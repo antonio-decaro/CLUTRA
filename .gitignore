@@ -1,6 +1,21 @@
+# Ignore compiled files for CUDA projects
 *.i
 *.ii
 *.gpu
 *.ptx
 *.cubin
 *.fatbin
+
+# Temporary object files and build directories
+*.o
+*.obj
+*.out
+build/
+
+# Ignore logs and temporary files
+*.log
+*.tmp
+*.swp
+
+# Ignore IDE specific files
+.vscode/
