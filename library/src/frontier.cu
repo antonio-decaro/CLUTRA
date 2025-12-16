@@ -315,8 +315,8 @@ size_t FrontierMLB<T, Levels>::getActiveFrontierSize() const {
   return static_cast<size_t>(value);
 }
 
-// Explicit instantiation(s) for commonly used template arguments
-template class FrontierMLB<uint32_t, 2>;
-template class FrontierMLB<uint64_t, 2>;
-
 } // namespace clutra::frontier
+
+// Explicit instantiation(s) for commonly used template arguments
+template class clutra::frontier::FrontierMLB<uint32_t, 2>;
+template class clutra::frontier::FrontierMLB<uint64_t, 2>;
