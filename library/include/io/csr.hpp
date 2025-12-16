@@ -5,12 +5,12 @@
 #pragma once
 #include <memory>
 #include <vector>
-#include <graph/graph.cuh>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <utils/types.hpp>
+#include <graph/properties.cuh>
 
 namespace clutra {
 namespace formats {
@@ -190,7 +190,7 @@ private:
 
 namespace io::csr {
 namespace detail::binary {
-static constexpr uint64_t magic = 0x4342535200000001ULL; // "CBSR" + version marker
+static constexpr uint64_t magic = 0x5359475243535201ULL; // "SYGCSR" + version marker
 static constexpr uint8_t directed_mask = 0x1;
 static constexpr uint8_t weighted_mask = 0x2;
 } // namespace detail
@@ -239,12 +239,7 @@ clutra::formats::CSR<ValueT, IndexT, OffsetT> fromMM(std::istream& iss, clutra::
  * @throws std::runtime_error if the file fails to open.
  */
 template<typename ValueT, typename IndexT, typename OffsetT>
-clutra::formats::CSR<ValueT, IndexT, OffsetT> fromMM(const std::string& filename, clutra::graph::Properties* properties = nullptr) {
-  std::ifstream file(filename);
-  if (!file.is_open()) { throw std::runtime_error("Failed to open file: " + filename); }
-
-  return fromMM<ValueT, IndexT, OffsetT>(file, properties);
-}
+clutra::formats::CSR<ValueT, IndexT, OffsetT> fromMM(const std::string& filename, clutra::graph::Properties* properties = nullptr);
 
 /**
  * @brief Reads a CSR (Compressed Sparse Row) matrix from a binary input stream.

@@ -11,6 +11,7 @@
 
 // Graph
 #include <graph/graph.cuh>
+#include <graph/properties.cuh>
 
 // IO includes
 #include <io/csr.hpp>

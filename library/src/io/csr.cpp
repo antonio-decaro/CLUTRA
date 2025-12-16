@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <string>
 
 
 template<typename ValueT, typename IndexT, typename OffsetT>
@@ -39,8 +40,10 @@ clutra::formats::CSR<ValueT, IndexT, OffsetT> clutra::formats::CSR<ValueT, Index
   return CSR<ValueT, IndexT, OffsetT>(std::move(inv_row_offsets), std::move(inv_column_indices), std::move(inv_values));
 };
 
+namespace clutra::io::csr {
+
 template <typename ValueT, typename IndexT, typename OffsetT>
-clutra::formats::CSR<ValueT, IndexT, OffsetT> clutra::io::csr::fromCSR(std::istream& iss) {
+clutra::formats::CSR<ValueT, IndexT, OffsetT> fromCSR(std::istream& iss) {
   size_t n_rows = 0;
   size_t n_nonzeros = 0;
   std::vector<OffsetT> row_offsets;
@@ -160,7 +163,15 @@ clutra::formats::CSR<ValueT, IndexT, OffsetT> fromMM(std::istream& iss, clutra::
 }
 
 template<typename ValueT, typename IndexT, typename OffsetT>
-clutra::formats::CSR<ValueT, IndexT, OffsetT> fromBinary(std::istream& iss, clutra::graph::Properties* properties = nullptr) {
+clutra::formats::CSR<ValueT, IndexT, OffsetT> fromMM(const std::string& filename, clutra::graph::Properties* properties) {
+  std::ifstream file(filename);
+  if (!file.is_open()) { throw std::runtime_error("Failed to open file: " + filename); }
+
+  return fromMM<ValueT, IndexT, OffsetT>(file, properties);
+}
+
+template<typename ValueT, typename IndexT, typename OffsetT>
+clutra::formats::CSR<ValueT, IndexT, OffsetT> fromBinary(std::istream& iss, clutra::graph::Properties* properties) {
   if (!iss) { throw std::runtime_error("Failed to read binary CSR matrix"); }
 
   size_t num_rows = 0;
@@ -210,8 +221,8 @@ clutra::formats::CSR<ValueT, IndexT, OffsetT> fromBinary(std::istream& iss, clut
 template<typename ValueT, typename IndexT, typename OffsetT>
 void toBinary(const clutra::formats::CSR<ValueT, IndexT, OffsetT>& csr,
               std::ostream& oss,
-              const clutra::graph::Properties& properties = clutra::graph::Properties()) {
-if (!oss) { throw std::runtime_error("Failed to write binary CSR matrix"); }
+              const clutra::graph::Properties& properties) {
+  if (!oss) { throw std::runtime_error("Failed to write binary CSR matrix"); }
 
   auto& row_offsets = csr.getRowOffsets();
   auto& column_indices = csr.getColumnIndices();
@@ -242,7 +253,30 @@ if (!oss) { throw std::runtime_error("Failed to write binary CSR matrix"); }
   oss.write(reinterpret_cast<const char*>(&values[0]), values.size() * sizeof(ValueT));
 }
 
-template class clutra::formats::CSR<float, uint32_t, uint32_t>;
-template class clutra::formats::CSR<double, uint32_t, uint32_t>;
-template class clutra::formats::CSR<float, uint64_t, uint64_t>;
-template class clutra::formats::CSR<double, uint64_t, uint64_t>;
+} // namespace clutra::io::csr
+
+#define CLUTRA_INSTANTIATE_CSR_IO(ValueT, IndexT, OffsetT)                                                             \
+  template class clutra::formats::CSR<ValueT, IndexT, OffsetT>;                                                        \
+  template clutra::formats::CSR<ValueT, IndexT, OffsetT> clutra::io::csr::fromCSR<ValueT, IndexT, OffsetT>(            \
+      std::istream&);                                                                                                  \
+  template clutra::formats::CSR<ValueT, IndexT, OffsetT> clutra::io::csr::fromMM<ValueT, IndexT, OffsetT>(             \
+      std::istream&, clutra::graph::Properties*);                                                                      \
+  template clutra::formats::CSR<ValueT, IndexT, OffsetT> clutra::io::csr::fromMM<ValueT, IndexT, OffsetT>(             \
+      const std::string&, clutra::graph::Properties*);                                                                 \
+  template clutra::formats::CSR<ValueT, IndexT, OffsetT> clutra::io::csr::fromBinary<ValueT, IndexT, OffsetT>(         \
+      std::istream&, clutra::graph::Properties*);                                                                      \
+  template void clutra::io::csr::toBinary<ValueT, IndexT, OffsetT>(                                                    \
+      const clutra::formats::CSR<ValueT, IndexT, OffsetT>&, std::ostream&, const clutra::graph::Properties&);
+
+CLUTRA_INSTANTIATE_CSR_IO(float, uint32_t, uint32_t)
+CLUTRA_INSTANTIATE_CSR_IO(double, uint32_t, uint32_t)
+CLUTRA_INSTANTIATE_CSR_IO(float, uint64_t, uint64_t)
+CLUTRA_INSTANTIATE_CSR_IO(double, uint64_t, uint64_t)
+CLUTRA_INSTANTIATE_CSR_IO(uint32_t, uint32_t, uint32_t)
+CLUTRA_INSTANTIATE_CSR_IO(uint16_t, uint32_t, uint32_t)
+CLUTRA_INSTANTIATE_CSR_IO(uint64_t, uint32_t, uint32_t)
+CLUTRA_INSTANTIATE_CSR_IO(uint32_t, uint64_t, uint64_t)
+CLUTRA_INSTANTIATE_CSR_IO(uint16_t, uint64_t, uint64_t)
+CLUTRA_INSTANTIATE_CSR_IO(uint64_t, uint64_t, uint64_t)
+
+#undef CLUTRA_INSTANTIATE_CSR_IO

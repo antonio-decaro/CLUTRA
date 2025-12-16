@@ -152,11 +152,21 @@ public:
   void computeActiveFrontier(bool invert = false) const;
   size_t getActiveFrontierSize() const;
 
+  static void swap(FrontierMLB<T, Levels>& first, FrontierMLB<T, Levels>& second) {
+    using std::swap;
+    swap(first._bitmap, second._bitmap);
+    swap(first._host_offsets_size, second._host_offsets_size);
+  }
+
 protected:
   DeviceFrontier _bitmap; ///< The bitmap.
   uint32_t* _host_offsets_size = nullptr; ///< Host-pinned mirror of offsets_size.
 };
 
+template<typename T, size_t Levels>
+void swap(FrontierMLB<T, Levels>& first, FrontierMLB<T, Levels>& second) {
+  FrontierMLB<T, Levels>::swap(first, second);
+}
 
 } // namespace clutra::frontier
 

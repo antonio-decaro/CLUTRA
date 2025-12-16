@@ -2,12 +2,28 @@
 #include "utils.hpp"
 #include <iostream>
 
-int main() {
-  std::cout << "CLUTRA Library Test" << std::endl;
+int main(int argc, char** argv) {
+
+  GraphOptions opts;
+  CLI::App app{"CLUTRA example"};
+  auto source_option = configureBaseCLI(app, opts);
+  CLI11_PARSE(app, argc, argv);
+
+  std::cerr << "[*] Reading CSR" << std::endl;
+  clutra::graph::Properties properties;
+  auto csr = readCSR<float, uint32_t, uint32_t>(opts, &properties);
+  auto graph = clutra::graph::createGraph(csr, properties);
+  std::cerr << "[*] CSR read complete" << std::endl;
+  printGraphInfo(graph);
+  
+  
   clutra::frontier::FrontierMLB<uint32_t> frontier(1024);
 
-  std::cout << clutra::detail::device::getDeviceName() << std::endl;
-  std::cout << "Num SMs: " << clutra::detail::device::getNumSMs() << std::endl;
+  int device_id;
+  cudaGetDevice(&device_id);
+
+  std::cout << clutra::detail::device::getDeviceName(device_id) << std::endl;
+  std::cout << "Num SMs: " << clutra::detail::device::getNumSMs(device_id) << std::endl;
 
 
   if (frontier.empty()) {
