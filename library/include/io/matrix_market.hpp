@@ -10,10 +10,7 @@
 
 #include <io/csr.hpp>
 
-namespace clutra {
-namespace io {
-namespace detail {
-namespace mm {
+namespace clutra::io::detail::mm {
 
 enum class mm_object {
   matrix,
@@ -45,6 +42,8 @@ struct Banner {
   mm_format format;
   mm_field field;
   mm_symmetry symmetry;
+
+  void read(const std::istream& iss);
 
   void read(const std::string& line) {
     std::istringstream iss(line);
@@ -147,7 +146,4 @@ struct Banner {
   }
 };
 
-} // namespace mm
-} // namespace detail
-} // namespace io
-} // namespace sygraph
+} // namespace clutra::io::detail::mm
