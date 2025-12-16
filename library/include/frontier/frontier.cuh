@@ -5,8 +5,8 @@
 
 #pragma once
 
-#include "types.hpp"
-#include "utils.cuh"
+#include <utils/types.hpp>
+#include <utils/misc.cuh>
 #include <algorithm>
 #include <cuda.h>
 
@@ -20,18 +20,18 @@ public:
   using bitmap_type = B;
   static constexpr uint32_t alignment = 32; ///< Number of elements for alignment (warp sized).
 
-  static constexpr uint32_t align_up(uint32_t value) {
+  static constexpr uint32_t alignUp(uint32_t value) {
     return (value + alignment - 1) / alignment * alignment;
   }
 
   MLBDevice(size_t num_elems) : _num_elems(num_elems) {
     _range = sizeof(bitmap_type) * clutra::detail::types::byte_size;
     _size[0] = (num_elems / _range) + (num_elems % _range != 0 ? 1 : 0);
-    _size[0] = align_up(_size[0]);
+    _size[0] = alignUp(_size[0]);
 
     for (uint16_t i = 1; i < Levels; i++) {
       _size[i] = (_size[i - 1] / _range) + (_size[i - 1] % _range != 0 ? 1 : 0);
-      _size[i] = align_up(std::max<uint32_t>(_size[i], 1));
+      _size[i] = alignUp(std::max<uint32_t>(_size[i], 1));
     }
   }
 

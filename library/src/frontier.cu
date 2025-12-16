@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <frontier.cuh>
-#include <utils.cuh>
+#include <frontier/frontier.cuh>
+#include <utils/profile.cuh>
 #include <thrust/reduce.h>
 #include <thrust/functional.h>
 #include <thrust/device_ptr.h>

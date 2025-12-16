@@ -5,3 +5,11 @@
 
 #pragma once
 
+namespace clutra::graph {
+
+struct Properties {
+  bool directed{false};
+  bool weighted{false};
+};
+
+}

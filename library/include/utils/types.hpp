@@ -9,7 +9,9 @@
 namespace clutra::detail::types {
 
 using bitmap_type_t = uint32_t;
-constexpr size_t byte_size = 8;
-constexpr size_t CU_SIZE = 256;
+using index_t = uint32_t;
+using offset_t = uint32_t;
+constexpr std::size_t byte_size = 8;
+constexpr std::size_t CU_SIZE = 256;
 
 }

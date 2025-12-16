@@ -6,4 +6,14 @@
 
 #pragma once
 
-#include <frontier.cuh>
+// Frontier
+#include <frontier/frontier.cuh>
+
+// Graph
+#include <graph/graph.cuh>
+
+// IO includes
+#include <io/csr.hpp>
+#include <io/matrix_market.hpp>
+
+#include <utils/profile.cuh>

@@ -6,6 +6,7 @@ file(GLOB_RECURSE CLUTRA_SOURCES
   ${PROJECT_SOURCE_DIR}/library/src/*.cu
   ${PROJECT_SOURCE_DIR}/library/src/*.cpp
   ${PROJECT_SOURCE_DIR}/library/src/*.c
+  ${PROJECT_SOURCE_DIR}/library/src/io/*.cpp
 )
 
 if(CLUTRA_SOURCES)
