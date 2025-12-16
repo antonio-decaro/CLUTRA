@@ -16,4 +16,6 @@
 #include <io/csr.hpp>
 #include <io/matrix_market.hpp>
 
+// Utils
 #include <utils/profile.cuh>
+#include <utils/device.cuh>

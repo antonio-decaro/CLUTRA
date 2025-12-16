@@ -6,6 +6,9 @@ int main() {
   std::cout << "CLUTRA Library Test" << std::endl;
   clutra::frontier::FrontierMLB<uint32_t> frontier(1024);
 
+  std::cout << clutra::detail::device::getDeviceName() << std::endl;
+  std::cout << "Num SMs: " << clutra::detail::device::getNumSMs() << std::endl;
+
 
   if (frontier.empty()) {
     std::cout << "Frontier is initially empty." << std::endl;
@@ -21,6 +24,7 @@ int main() {
   }
   frontier.insert(11);
   frontier.insert(512);
+
   std::cout << frontier.size() << " elements in the frontier." << std::endl;
   frontier.computeActiveFrontier();
   std::cout << "Active frontier size: " << frontier.getActiveFrontierSize() << std::endl;
