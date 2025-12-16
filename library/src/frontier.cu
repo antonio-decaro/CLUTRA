@@ -99,6 +99,8 @@ FrontierMLB<T, Levels>::FrontierMLB(size_t num_elems) : _bitmap(num_elems) {
   uint32_t* offsets_size;
   CUDA_CHECK(cudaMalloc(&offsets_size, sizeof(uint32_t)));
   CUDA_CHECK(cudaMemset(offsets_size, 0, sizeof(uint32_t)));
+  CUDA_CHECK(cudaHostAlloc(&_host_offsets_size, sizeof(uint32_t), cudaHostAllocPortable));
+  *_host_offsets_size = 0;
 
   _bitmap.setData(ptr);
   _bitmap.setOffsets(offsets);
@@ -115,6 +117,10 @@ FrontierMLB<T, Levels>::~FrontierMLB() {
   _bitmap.setOffsets(nullptr);
   CUDA_CHECK(cudaFree(_bitmap.getOffsetsSize()));
   _bitmap.setOffsetsSize(nullptr);
+  if (_host_offsets_size != nullptr) {
+    CUDA_CHECK(cudaFreeHost(_host_offsets_size));
+    _host_offsets_size = nullptr;
+  }
 }
 
 template<typename T, size_t Levels>
@@ -123,14 +129,13 @@ bool FrontierMLB<T, Levels>::empty() const {
   size_t bitmap_size = bitmap.getBitmapSize(Levels - 1);
 
   thrust::device_ptr<bitmap_type> dev_ptr(bitmap.getData(Levels - 1));
+  clutra::profile::KernelProfiler profiler("emptyKernel", "core");
   bitmap_type result = thrust::reduce(
       thrust::device,
       dev_ptr,
-      dev_ptr + bitmap_size,
-      static_cast<bitmap_type>(0),
-      thrust::plus<bitmap_type>());
-
-  return result == static_cast<bitmap_type>(0);
+      dev_ptr + bitmap_size);
+  profiler.stop();
+  return !result;
 }
 
 template<typename T, size_t Levels>
@@ -138,6 +143,7 @@ bool FrontierMLB<T, Levels>::check(size_t idx) const {
   auto bitmap = this->getDeviceFrontier();
   bool* d_result;
   bool h_result;
+  clutra::profile::KernelProfiler profiler("checkKernel", "operational");
   CUDA_CHECK(cudaMalloc(&d_result, sizeof(bool)));
 
   clutra::detail::kernels::executeKernel<<<1, 1>>>([=, d_result = d_result] __device__() { *d_result = bitmap.check(idx); });
@@ -146,24 +152,29 @@ bool FrontierMLB<T, Levels>::check(size_t idx) const {
 
   CUDA_CHECK(cudaMemcpy(&h_result, d_result, sizeof(bool), cudaMemcpyDeviceToHost));
   CUDA_CHECK(cudaFree(d_result));
+  profiler.stop();
   return h_result;
 }
 
 template<typename T, size_t Levels>
 bool FrontierMLB<T, Levels>::insert(size_t idx) {
   auto bitmap = this->getDeviceFrontier();
+  clutra::profile::KernelProfiler profiler("insertKernel", "operational");
   clutra::detail::kernels::executeKernel<<<1, 1>>>([=] __device__() { bitmap.insert(idx); });
   CUDA_CHECK(cudaGetLastError());
   CUDA_CHECK(cudaDeviceSynchronize());
+  profiler.stop();
   return true;
 }
 
 template<typename T, size_t Levels>
 bool FrontierMLB<T, Levels>::remove(size_t idx) {
   auto bitmap = this->getDeviceFrontier();
+  clutra::profile::KernelProfiler profiler("removeKernel", "operational");
   clutra::detail::kernels::executeKernel<<<1, 1>>>([=] __device__() { bitmap.remove(idx); });
   CUDA_CHECK(cudaGetLastError());
   CUDA_CHECK(cudaDeviceSynchronize());
+  profiler.stop();
   return true;
 }
 
@@ -181,6 +192,7 @@ size_t FrontierMLB<T, Levels>::size() const {
     return count;
   };
 
+  clutra::profile::KernelProfiler profiler("sizeKernel", "operational");
   thrust::device_ptr<bitmap_type> dev_ptr(bitmap.getData());
   size_t result = thrust::transform_reduce(
       thrust::device,
@@ -190,6 +202,7 @@ size_t FrontierMLB<T, Levels>::size() const {
       static_cast<size_t>(0),
       thrust::plus<size_t>());
 
+  profiler.stop();
   return result;
 }
 
@@ -201,11 +214,15 @@ FrontierMLB<T, Levels>& FrontierMLB<T, Levels>::operator=(const FrontierMLB& oth
   for (size_t i = 0; i < Levels; i++) {
     CUDA_CHECK(cudaMemcpy(_bitmap.getData(i), other._bitmap.getData(i), _bitmap.getBitmapSize(i) * sizeof(bitmap_type), cudaMemcpyDeviceToDevice));
   }
+  if (_host_offsets_size != nullptr && other._host_offsets_size != nullptr) {
+    *_host_offsets_size = *other._host_offsets_size;
+  }
   return *this;
 }
 
 template<typename T, size_t Levels>
 void FrontierMLB<T, Levels>::merge(FrontierMLB<T>& other) {
+  clutra::profile::KernelProfiler profiler("mergeLevelKernel", "operational");
   for (size_t level = 0; level < Levels; ++level) {
     size_t n = _bitmap.getBitmapSize(level);
     if (n == 0) {
@@ -224,10 +241,12 @@ void FrontierMLB<T, Levels>::merge(FrontierMLB<T>& other) {
     CUDA_CHECK(cudaGetLastError());
   }
   CUDA_CHECK(cudaDeviceSynchronize());
+  profiler.stop();
 }
 
 template<typename T, size_t Levels>
 void FrontierMLB<T, Levels>::intersect(FrontierMLB<T>& other) {
+  clutra::profile::KernelProfiler profiler("computeActiveFrontierKernel", "operational");
   for (size_t level = 0; level < Levels; ++level) {
     size_t n = _bitmap.getBitmapSize(level);
     if (n == 0) {
@@ -246,42 +265,54 @@ void FrontierMLB<T, Levels>::intersect(FrontierMLB<T>& other) {
     CUDA_CHECK(cudaGetLastError());
   }
   CUDA_CHECK(cudaDeviceSynchronize());
+  profiler.stop();
 }
 
 template<typename T, size_t Levels>
 void FrontierMLB<T, Levels>::clear() {
+  clutra::profile::KernelProfiler profiler("clearKernel", "core");
+#pragma unroll
   for (size_t i = 0; i < Levels; i++) {
     CUDA_CHECK(cudaMemset(_bitmap.getData(i), 0, _bitmap.getBitmapSize(i) * sizeof(bitmap_type)));
   }
   CUDA_CHECK(cudaMemset(_bitmap.getOffsets(), 0, _bitmap.getBitmapSize() * sizeof(int)));
+  CUDA_CHECK(cudaMemset(_bitmap.getOffsetsSize(), 0, sizeof(uint32_t)));
+  if (_host_offsets_size != nullptr) { *_host_offsets_size = 0; }
+  profiler.stop();
 }
 
 template<typename T, size_t Levels>
-const typename FrontierMLB<T, Levels>::DeviceFrontier& FrontierMLB<T, Levels>::getDeviceFrontier() const {
-  return _bitmap;
-}
-
-template<typename T, size_t Levels>
-size_t FrontierMLB<T, Levels>::computeActiveFrontier(bool invert) const {
+void FrontierMLB<T, Levels>::computeActiveFrontier(bool invert) const {
   auto bitmap = this->getDeviceFrontier();
   size_t level_size = bitmap.getBitmapSize(1);
   uint32_t range = bitmap.getBitmapRange();
 
   CUDA_CHECK(cudaMemset(bitmap.getOffsetsSize(), 0, sizeof(uint32_t)));
   if (level_size == 0 || range == 0) {
-    return 0;
+    if (_host_offsets_size != nullptr) { *_host_offsets_size = 0; }
+    return;
   }
 
   const int threads = 256;
   int blocks = static_cast<int>((level_size + threads - 1) / threads);
   int shared_mem_size = threads * range * sizeof(int); // each thread can store up to 'range' offsets
+  clutra::profile::KernelProfiler profiler("computeActiveFrontierKernel", "core");
   detail::computeActiveFrontierKernel<<<blocks, threads, shared_mem_size>>>(bitmap, level_size, range, invert);
   CUDA_CHECK(cudaGetLastError());
   CUDA_CHECK(cudaDeviceSynchronize());
+  profiler.stop();
+}
 
-  uint32_t host_size = 0;
-  CUDA_CHECK(cudaMemcpy(&host_size, bitmap.getOffsetsSize(), sizeof(uint32_t), cudaMemcpyDeviceToHost));
-  return static_cast<size_t>(host_size);
+template<typename T, size_t Levels>
+size_t FrontierMLB<T, Levels>::getActiveFrontierSize() const {
+  auto bitmap = this->getDeviceFrontier();
+  clutra::profile::KernelProfiler profiler("getActiveFrontierSize", "core");
+  if (_host_offsets_size != nullptr) {
+    CUDA_CHECK(cudaMemcpy(_host_offsets_size, bitmap.getOffsetsSize(), sizeof(uint32_t), cudaMemcpyDeviceToHost));
+  }
+  uint32_t value = (_host_offsets_size != nullptr ? *_host_offsets_size : 0);
+  profiler.stop();
+  return static_cast<size_t>(value);
 }
 
 // Explicit instantiation(s) for commonly used template arguments

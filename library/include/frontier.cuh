@@ -7,6 +7,7 @@
 
 #include "types.hpp"
 #include "utils.cuh"
+#include <algorithm>
 #include <cuda.h>
 
 namespace clutra::frontier {
@@ -17,12 +18,21 @@ template<typename T, size_t Levels, typename B = clutra::detail::types::bitmap_t
 class MLBDevice {
 public:
   using bitmap_type = B;
+  static constexpr uint32_t alignment = 32; ///< Number of elements for alignment (warp sized).
+
+  static constexpr uint32_t align_up(uint32_t value) {
+    return (value + alignment - 1) / alignment * alignment;
+  }
 
   MLBDevice(size_t num_elems) : _num_elems(num_elems) {
     _range = sizeof(bitmap_type) * clutra::detail::types::byte_size;
     _size[0] = (num_elems / _range) + (num_elems % _range != 0 ? 1 : 0);
+    _size[0] = align_up(_size[0]);
 
-    for (uint16_t i = 1; i < Levels; i++) { _size[i] = (_size[i - 1] / _range) + (_size[i - 1] % _range != 0 ? 1 : 0); }
+    for (uint16_t i = 1; i < Levels; i++) {
+      _size[i] = (_size[i - 1] / _range) + (_size[i - 1] % _range != 0 ? 1 : 0);
+      _size[i] = align_up(std::max<uint32_t>(_size[i], 1));
+    }
   }
 
   __host__ __device__ inline uint32_t getBitmapSize() const { return _size[0]; }
@@ -138,11 +148,13 @@ public:
   void intersect(FrontierMLB<T>& other);
   void clear();
 
-  const DeviceFrontier& getDeviceFrontier() const;
-  size_t computeActiveFrontier(bool invert = false) const;
+  const DeviceFrontier& getDeviceFrontier() const { return _bitmap; }
+  void computeActiveFrontier(bool invert = false) const;
+  size_t getActiveFrontierSize() const;
 
 protected:
   DeviceFrontier _bitmap; ///< The bitmap.
+  uint32_t* _host_offsets_size = nullptr; ///< Host-pinned mirror of offsets_size.
 };
 
 
@@ -170,60 +182,3 @@ protected:
 //     }
 //     _queue.wait();
 //   }
-
-  // /**
-  //  * @brief Computes the active frontier by populating the offsets array with the indices of active elements.
-  //  * @param invert If true, computes the inactive frontier instead (for pull-based advance operations).
-  //  */
-  // sycl::event computeActiveFrontier(bool invert = false) const {
-  //   sycl::range<1> local_range{types::detail::COMPUTE_UNIT_SIZE};
-  //   auto bitmap = this->getDeviceFrontier();
-  //   size_t size = bitmap.getBitmapSize(1);
-  //   uint32_t range = bitmap.getBitmapRange();
-  //   // sycl::range<1> global_range{(size > local_range[0] ? size + local_range[0] - (size % local_range[0]) : local_range[0])};
-  //   size_t global_size = sygraph::detail::device::getNumComputeUnits(_queue) * local_range[0];
-  //   sycl::range<1> global_range{global_size};
-
-  //   auto e = this->_queue.submit([&](sycl::handler& cgh) {
-  //     sycl::local_accessor<int, 1> local_offsets(local_range[0] * range, cgh);
-  //     sycl::local_accessor<uint32_t, 1> local_size(1, cgh);
-
-  //     cgh.parallel_for<mlb_compute_active_frontier_kernel>(
-  //         sycl::nd_range<1>{global_range, local_range},
-  //         [=, offsets_size = bitmap.getOffsetsSize(), offsets = bitmap.getOffsets()](sycl::nd_item<1> item) {
-  //           // if (offsets_size[0] > 0) { return; } // TODO optimize for multiple calls on the same frontier
-  //           int gid = item.get_global_linear_id();
-  //           auto group = item.get_group();
-  //           if (item.get_global_linear_id() == 0) { offsets_size[0] = 0; }
-  //           sycl::atomic_ref<uint32_t, sycl::memory_order::relaxed, sycl::memory_scope::work_group> local_size_ref(local_size[0]);
-  //           sycl::atomic_ref<uint32_t, sycl::memory_order::relaxed, sycl::memory_scope::device> offsets_size_ref{offsets_size[0]};
-
-  //           if (group.leader()) { local_size_ref.store(0); }
-  //           sycl::group_barrier(group);
-  //           for (uint32_t gid = item.get_global_linear_id(); gid < size; gid += item.get_global_range(0)) {
-  //             bitmap_type data = bitmap.getData(1)[gid];
-  //             for (size_t i = 0; i < range; i++) {
-  //               bool is_active = (data & (static_cast<bitmap_type>(1) << i)) != 0;
-  //               uint32_t pos;
-  //               if ((!invert && !is_active)
-  //                   || (invert && (is_active && bitmap.getData(0)[i + gid * range] == std::numeric_limits<bitmap_type>::max()))) {
-  //                 continue;
-  //               }
-
-  //               local_offsets[local_size_ref++] = static_cast<int>(i + gid * range);
-  //             }
-  //           }
-
-  //           sycl::group_barrier(group);
-
-  //           size_t data_offset = 0;
-  //           if (group.leader()) { data_offset = offsets_size_ref.fetch_add(local_size_ref.load()); }
-  //           data_offset = sycl::group_broadcast(group, data_offset, 0);
-  //           for (size_t i = item.get_local_linear_id(); i < local_size_ref.load(); i += item.get_local_range(0)) {
-  //             offsets[data_offset + i] = local_offsets[i];
-  //           }
-  //         });
-  //   });
-
-  //   return e;
-  // }

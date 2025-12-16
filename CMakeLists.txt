@@ -6,8 +6,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # Set explicit CUDA standard (avoid CMake inferring unsupported CUDA20)
 # Use a CUDA-compatible host/device standard (choose 14 or 17 depending on your CUDA toolkit).
-set(CMAKE_CUDA_STANDARD 14)
+set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+
+option(ENABLE_PROFILING "Enable CUDA kernel profiling instrumentation" OFF)
 
 # Define the project
 project(CLUTRA

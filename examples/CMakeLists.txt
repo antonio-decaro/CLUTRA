@@ -12,7 +12,7 @@ add_executable(clutra_test ${TEST_SRCS})
 set_target_properties(clutra_test PROPERTIES
   CXX_STANDARD 20
   CXX_STANDARD_REQUIRED ON
-  CUDA_STANDARD 14
+  CUDA_STANDARD 17
   CUDA_STANDARD_REQUIRED ON
 )
 
@@ -20,6 +20,10 @@ set_target_properties(clutra_test PROPERTIES
 target_link_libraries(clutra_test PRIVATE clutra)
 if (TARGET CUDA::cudart)
   target_link_libraries(clutra_test PRIVATE CUDA::cudart)
+endif()
+
+if(ENABLE_PROFILING)
+  target_compile_definitions(clutra_test PUBLIC ENABLE_PROFILING)
 endif()
 
 # Apply nvcc-specific flags: enable extended lambdas in device code

@@ -15,6 +15,10 @@ else()
   add_library(clutra INTERFACE)
 endif()
 
+if (ENABLE_PROFILING)
+  target_compile_definitions(clutra PUBLIC ENABLE_PROFILING)
+endif()
+
 # Public include directory
 target_include_directories(clutra PUBLIC
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/include>
