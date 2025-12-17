@@ -22,16 +22,13 @@ template<size_t BlockSize, typename GraphDevT, typename FrontierDevT, typename L
 __global__ void advanceKernel(GraphDevT graph_dev, FrontierDevT in_dev_frontier, FrontierDevT out_dev_frontier,int coarsening_factor, LambdaT functor) {
   __shared__ uint32_t n_edges_cta[BlockSize];
   __shared__ uint32_t n_edges_warp[BlockSize];
-  // __shared__ bool visited[BlockSize];
   __shared__ uint32_t warp_reduce[BlockSize];
   __shared__ uint32_t warp_reduce_tail[BlockSize / 32];
-  // __shared__ uint32_t warp_reduce_ids[BlockSize];
   __shared__ uint32_t cta_reduce[BlockSize];
   __shared__ uint32_t cta_reduce_tail;
-  // __shared__ uint32_t cta_reduce_ids[BlockSize];
   __shared__ uint32_t thread_reduce_vertices[BlockSize];
   __shared__ uint32_t thread_reduce_degrees[BlockSize];
-  __shared__ uint32_t thread_reduce_tail;
+  __shared__ uint32_t thread_reduce_tail[BlockSize / 32];
   
   // fetch frontier info
   const int warp_id = threadIdx.x / 32;
@@ -45,14 +42,15 @@ __global__ void advanceKernel(GraphDevT graph_dev, FrontierDevT in_dev_frontier,
   const auto assigned_vertex = (bitmap_offsets[actual_id_offset] * bitmap_range) + (threadIdx.x % bitmap_range);
 
   // init computation
-  if ((threadIdx.x % 32) == 0) warp_reduce_tail[warp_id] = 0;
-  if (threadIdx.x == 0) {
-    cta_reduce_tail = 0;
-    thread_reduce_tail = 0;
+  if ((threadIdx.x % 32) == 0) {
+    warp_reduce_tail[warp_id] = 0;
+    thread_reduce_tail[warp_id] = 0;
   }
+  if (threadIdx.x == 0) cta_reduce_tail = 0;
 
   __syncthreads();
 
+  // classify vertices by degree
   const uint32_t offset = warp_id * 32;
   if (assigned_vertex < graph_dev.getVertexCount() && in_dev_frontier.check(assigned_vertex)) {
     const uint32_t n_edges = graph_dev.getDegree(assigned_vertex);
@@ -60,20 +58,16 @@ __global__ void advanceKernel(GraphDevT graph_dev, FrontierDevT in_dev_frontier,
       const uint32_t loc = atomicAdd(&cta_reduce_tail, 1);
       n_edges_cta[loc] = n_edges;
       cta_reduce[loc] = assigned_vertex;
-      // cta_reduce_ids[loc] = threadIdx.x;
     } else if (n_edges >= 32) {
       const uint32_t loc = atomicAdd(&warp_reduce_tail[warp_id], 1);
       n_edges_warp[offset + loc] = n_edges;
       warp_reduce[offset + loc] = assigned_vertex;
-      // warp_reduce_ids[offset + loc] = threadIdx.x;
     } else {
-      const int loc = atomicAdd(&thread_reduce_tail, 1);
-      thread_reduce_vertices[loc] = assigned_vertex;
-      thread_reduce_degrees[loc] = n_edges;
+      const int loc = atomicAdd(&thread_reduce_tail[warp_id], 1);
+      const int write_idx = (warp_id * 32) + loc;
+      thread_reduce_vertices[write_idx] = assigned_vertex;
+      thread_reduce_degrees[write_idx] = n_edges;
     }
-    // visited[threadIdx.x] = false;
-  } else {
-    // visited[threadIdx.x] = true;
   }
 
   __syncthreads();
@@ -93,11 +87,9 @@ __global__ void advanceKernel(GraphDevT graph_dev, FrontierDevT in_dev_frontier,
         out_dev_frontier.insert(neighbor);
       }
     }
-
-    // if (threadIdx.x == 0) { visited[cta_reduce_ids[i]] = true; }
   }
-
-  // __syncwarp();
+  
+  // process warp large degree vertices
   for (int i = 0; i < warp_reduce_tail[warp_id]; ++i) {
     const auto vertex = warp_reduce[offset + i];
     const uint32_t n_edges = n_edges_warp[offset + i];
@@ -112,17 +104,16 @@ __global__ void advanceKernel(GraphDevT graph_dev, FrontierDevT in_dev_frontier,
         out_dev_frontier.insert(neighbor);
       }
     }
-
-    // if ((threadIdx.x % 32) == 0) { visited[warp_reduce_ids[offset + i]] = true; }
   }
 
-  // __syncwarp();
-
-  for (int i = 0; i < thread_reduce_tail; ++i) {
-    const auto vertex = thread_reduce_vertices[i];
-    const auto n_edges = thread_reduce_degrees[i];
+  // process small degree vertices
+  const uint32_t tiny_offset = warp_id * 32;
+  const uint32_t tiny_tail = thread_reduce_tail[warp_id];
+  for (int i = 0; i < tiny_tail; ++i) {
+    const auto vertex = thread_reduce_vertices[tiny_offset + i];
+    const auto n_edges = thread_reduce_degrees[tiny_offset + i];
     auto start = graph_dev.begin(vertex);
-    for (int j = threadIdx.x; j < n_edges; j += blockDim.x) {
+    for (int j = threadIdx.x % 32; j < n_edges; j += 32) {
       auto n = start + j;
       const auto edge = n.getIndex();
       const auto weight = graph_dev.getEdgeWeight(edge);
@@ -131,19 +122,6 @@ __global__ void advanceKernel(GraphDevT graph_dev, FrontierDevT in_dev_frontier,
         out_dev_frontier.insert(neighbor);
       }
     }
-  }
-  // if (!visited[threadIdx.x]) {
-  //   const auto start = graph_dev.begin(assigned_vertex);
-  //   const auto end = graph_dev.end(assigned_vertex);
-  //   for (auto n = start; n != end; ++n) {
-  //     const auto edge = n.getIndex();
-  //     const auto weight = graph_dev.getEdgeWeight(edge);
-  //     const auto neighbor = *n;
-  //     if (functor(assigned_vertex, neighbor, edge, weight)) {
-  //       out_dev_frontier.insert(neighbor);
-  //     }
-  //   }
-  // }
 }
 
 } // namespace clutra::operators::advance::detail
