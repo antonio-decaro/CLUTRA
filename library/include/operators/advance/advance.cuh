@@ -125,7 +125,7 @@ __global__ void advanceKernel(GraphDevT graph_dev, FrontierDevT in_dev_frontier,
 
 template<typename GraphT, typename FrontierT, typename LambdaT>
 void frontier(const GraphT& graph, const FrontierT& input_frontier, FrontierT& output_frontier, LambdaT&& functor) {
-  constexpr size_t CU_SIZE = 512;
+  constexpr size_t CU_SIZE = 256;
   auto in_dev_frontier = input_frontier.getDeviceFrontier();
   auto out_dev_frontier = output_frontier.getDeviceFrontier();
   auto graph_dev = graph.getDeviceGraph();
@@ -135,9 +135,12 @@ void frontier(const GraphT& graph, const FrontierT& input_frontier, FrontierT& o
   // compute launch informations
   const size_t coarsening_factor = CU_SIZE  / 32 /* Warp Size */;
   const size_t bitmap_range = in_dev_frontier.getBitmapRange();
+  if (bitmap_range != 32) {
+    throw std::runtime_error("Advance operator currently supports only frontiers with bitmap range equal to 32.");
+  }
   const size_t active_size = input_frontier.getActiveFrontierSize();
 
-  const size_t block_size = coarsening_factor * bitmap_range;
+  const size_t block_size = CU_SIZE;
   const size_t grid_size = ((active_size * bitmap_range) + block_size - 1) / block_size;
 
   // launch advance kernel
