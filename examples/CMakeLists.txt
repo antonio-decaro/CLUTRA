@@ -4,8 +4,9 @@
 # Source file for the test binary
 include(FetchContent)
 
-set(TEST_SRCS
-  ${PROJECT_SOURCE_DIR}/examples/src/test.cu
+# Gather every CUDA example source in the src folder
+file(GLOB EXAMPLE_SRCS
+  ${PROJECT_SOURCE_DIR}/examples/src/*.cu
 )
 
 FetchContent_Declare(
@@ -24,28 +25,33 @@ endif()
 
 include_directories(${PROJECT_SOURCE_DIR}/examples/include)
 
-add_executable(clutra_test ${TEST_SRCS})
+# Create a binary per CUDA source file so each example can be run independently
+foreach(example_src ${EXAMPLE_SRCS})
+  get_filename_component(example_name ${example_src} NAME_WE)
+  set(target_name clutra_${example_name})
 
-# Ensure the target uses compatible language standards
-set_target_properties(clutra_test PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CUDA_STANDARD 17
-  CUDA_STANDARD_REQUIRED ON
-)
+  add_executable(${target_name} ${example_src})
 
-# Link against the library target and CUDA runtime
-target_link_libraries(clutra_test PRIVATE clutra CLI11::CLI11)
-if (TARGET CUDA::cudart)
-  target_link_libraries(clutra_test PRIVATE CUDA::cudart)
-endif()
+  # Ensure each target uses compatible language standards
+  set_target_properties(${target_name} PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    CUDA_STANDARD 17
+    CUDA_STANDARD_REQUIRED ON
+  )
 
-if(ENABLE_PROFILING)
-  target_compile_definitions(clutra_test PUBLIC ENABLE_PROFILING)
-endif()
+  # Link against the library target and CUDA runtime
+  target_link_libraries(${target_name} PRIVATE clutra CLI11::CLI11)
+  if (TARGET CUDA::cudart)
+    target_link_libraries(${target_name} PRIVATE CUDA::cudart)
+  endif()
 
-# Apply nvcc-specific flags: enable extended lambdas in device code
-target_compile_options(clutra_test PRIVATE
-  $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda>
-)
+  if(ENABLE_PROFILING)
+    target_compile_definitions(${target_name} PUBLIC ENABLE_PROFILING)
+  endif()
 
+  # Apply nvcc-specific flags: enable extended lambdas in device code
+  target_compile_options(${target_name} PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda>
+  )
+endforeach()

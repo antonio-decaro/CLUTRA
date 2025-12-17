@@ -13,6 +13,9 @@
 #include <graph/graph.cuh>
 #include <graph/properties.cuh>
 
+// Operators
+#include <operators/advance/advance.cuh>
+
 // IO includes
 #include <io/csr.hpp>
 #include <io/matrix_market.hpp>

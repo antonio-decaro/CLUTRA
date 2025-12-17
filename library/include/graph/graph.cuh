@@ -21,7 +21,7 @@ public:
   using edge_t = OffsetT;  ///< The type used to represent edges of the graph.
   using weight_t = ValueT; ///< The type used to represent weights of the graph.
   struct NeighborIterator {
-    NeighborIterator(IndexT* start_ptr, IndexT* ptr) : _start_ptr(start_ptr), _ptr(ptr) {}
+    __device__ NeighborIterator(IndexT* start_ptr, IndexT* ptr) : _start_ptr(start_ptr), _ptr(ptr) {}
 
     __device__ inline IndexT operator*() const { return *_ptr; }
 
@@ -148,7 +148,7 @@ public:
 
   /* Methods */
 
-  auto& getDeviceGraph() { return _device_graph; }
+  const auto& getDeviceGraph() const { return _device_graph; }
 
   auto& getInverseDeviceGraph() { return _inverse_device_graph; }
 
