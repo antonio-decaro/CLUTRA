@@ -29,27 +29,34 @@ __global__ void advanceKernel(GraphDevT graph_dev, FrontierDevT in_dev_frontier,
   __shared__ uint32_t cta_reduce[BlockSize];
   __shared__ uint32_t cta_reduce_tail;
   __shared__ uint32_t cta_reduce_ids[BlockSize];
+  
+  // fetch frontier info
+  const int warp_id = threadIdx.x / 32;
+  const int offsets_size = in_dev_frontier.getOffsetsSize()[0];
+  const uint16_t bitmap_range = in_dev_frontier.getBitmapRange();
+  const int* bitmap_offsets = in_dev_frontier.getOffsets();
 
   // fetch assigned vertex
-  const uint16_t bitmap_range = in_dev_frontier.getBitmapRange();
   const uint32_t actual_id_offset = (blockIdx.x * coarsening_factor) + (threadIdx.x / bitmap_range);
-  const int* bitmap_offsets = in_dev_frontier.getOffsets();
+  // if (actual_id_offset >= offsets_size) return;
   const auto assigned_vertex = (bitmap_offsets[actual_id_offset] * bitmap_range) + (threadIdx.x % bitmap_range);
-  const int warp_id = threadIdx.x / 32;
 
   // init computation
   if ((threadIdx.x % 32) == 0) warp_reduce_tail[warp_id] = 0;
   if (threadIdx.x == 0) cta_reduce_tail = 0;
 
+  __syncthreads();
+
   const uint32_t offset = warp_id * 32;
-  if (in_dev_frontier.check(assigned_vertex)) {
+  if (assigned_vertex < graph_dev.getVertexCount() && in_dev_frontier.check(assigned_vertex)) {
     const uint32_t n_edges = graph_dev.getDegree(assigned_vertex);
-    if (n_edges >= blockDim.x) {
+    if (n_edges >= blockDim.x * blockDim.x) {
       const uint32_t loc = atomicAdd(&cta_reduce_tail, 1);
       n_edges_cta[loc] = n_edges;
       cta_reduce[loc] = assigned_vertex;
       cta_reduce_ids[loc] = threadIdx.x;
-    } else if (n_edges >= 32) {
+    } else 
+    if (n_edges >= 32) {
       const uint32_t loc = atomicAdd(&warp_reduce_tail[warp_id], 1);
       n_edges_warp[offset + loc] = n_edges;
       warp_reduce[offset + loc] = assigned_vertex;
@@ -120,7 +127,7 @@ __global__ void advanceKernel(GraphDevT graph_dev, FrontierDevT in_dev_frontier,
 
 template<typename GraphT, typename FrontierT, typename LambdaT>
 void frontier(const GraphT& graph, const FrontierT& input_frontier, FrontierT& output_frontier, LambdaT&& functor) {
-  constexpr size_t CU_SIZE = 256;
+  constexpr size_t CU_SIZE = 512;
   auto in_dev_frontier = input_frontier.getDeviceFrontier();
   auto out_dev_frontier = output_frontier.getDeviceFrontier();
   auto graph_dev = graph.getDeviceGraph();
@@ -131,7 +138,7 @@ void frontier(const GraphT& graph, const FrontierT& input_frontier, FrontierT& o
   const size_t coarsening_factor = CU_SIZE  / 32 /* Warp Size */;
   const size_t bitmap_range = in_dev_frontier.getBitmapRange();
   const size_t active_size = input_frontier.getActiveFrontierSize();
-  
+
   const size_t block_size = coarsening_factor * bitmap_range;
   const size_t grid_size = ((active_size * bitmap_range) + block_size - 1) / block_size;
 
