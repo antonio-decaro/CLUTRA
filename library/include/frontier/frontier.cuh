@@ -51,7 +51,7 @@ public:
     }
   }
 
-  __device__ inline bool insert(T idx) const {
+  __device__ inline void insert(T idx) const {
 #pragma unroll
     for (uint16_t i = 0; i < Levels; i++) {
       T lidx = idx;
@@ -60,24 +60,25 @@ public:
         atomicOr(&_data[i][getBitmapIndex(lidx)], static_cast<bitmap_type>(static_cast<bitmap_type>(1) << (lidx % _range)));
       }
     }
-    return true;
   }
 
-  __device__ inline bool remove(uint32_t idx) const {
+  __device__ inline void remove(uint32_t idx) const {
     atomicAnd(&_data[0][getBitmapIndex(idx)], ~(static_cast<bitmap_type>(static_cast<bitmap_type>(1) << (idx % _range))));
     for (uint16_t i = 1; i < Levels; i++) {
       uint32_t lidx = idx;
       for (uint16_t _ = 0; _ < i; _++) { lidx /= _range; } // the index must be divided by the range^level
       atomicAnd(&_data[i][getBitmapIndex(lidx)], ~(static_cast<bitmap_type>(static_cast<bitmap_type>(1) << (lidx % _range))));
     }
-    return true;
   }
 
   __device__ inline void reset() const {
-    for (uint16_t i = 0; i < _size; i++) { _data[i] = static_cast<bitmap_type>(0); }
+#pragma unroll
+    for (uint16_t l = 0; l < Levels; ++l) {
+      for (uint32_t i = 0; i < _size[l]; ++i) { _data[l][i] = static_cast<bitmap_type>(0); }
+    }
   }
 
-  __device__ inline void reset(uint32_t id) const { _data[id] = static_cast<bitmap_type>(0); }
+  __device__ inline void reset(uint32_t id) const { _data[0][id] = static_cast<bitmap_type>(0); }
 
   __device__ inline bool check(uint32_t idx) const { return _data[0][idx / _range] & (static_cast<bitmap_type>(1) << (idx % _range)); }
 
@@ -87,7 +88,9 @@ public:
     return count == static_cast<bitmap_type>(0);
   }
 
-  __device__ inline bool empty(uint32_t el_idx, uint16_t level) const { return _data[level][el_idx]; }
+  __device__ inline bool empty(uint32_t el_idx, uint16_t level) const {
+    return _data[level][el_idx] == static_cast<bitmap_type>(0);
+  }
 
   __host__ __device__ inline uint32_t getBitmapIndex(uint32_t idx) const { return idx / _range; }
 
@@ -130,6 +133,8 @@ public:
   using DeviceFrontier = detail::MLBDevice<T, Levels>;
 
   FrontierMLB(size_t num_elems);
+  FrontierMLB(const FrontierMLB& other);
+  FrontierMLB(FrontierMLB&& other) noexcept;
   ~FrontierMLB();
 
   size_t getBitmapSize() const {return _bitmap.getBitmapSize();}
@@ -144,6 +149,7 @@ public:
   size_t size() const;
 
   FrontierMLB& operator=(const FrontierMLB& other);
+  FrontierMLB& operator=(FrontierMLB&& other) noexcept;
   void merge(FrontierMLB<T>& other);
   void intersect(FrontierMLB<T>& other);
   void clear();

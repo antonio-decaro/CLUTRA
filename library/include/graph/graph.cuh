@@ -140,6 +140,10 @@ public:
    * @param properties The properties of the graph.
    */
   GraphCSR(clutra::formats::CSR<ValueT, IndexT, OffsetT>& csr, Properties properties);
+  GraphCSR(GraphCSR&& other) noexcept;
+  GraphCSR(const GraphCSR&) = delete;
+  GraphCSR& operator=(const GraphCSR&) = delete;
+  GraphCSR& operator=(GraphCSR&&) = delete;
 
   /**
    * @brief Destroys the graph_csr_t object and frees the allocated memory.

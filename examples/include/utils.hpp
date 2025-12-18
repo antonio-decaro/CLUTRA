@@ -10,7 +10,10 @@
 #include <iostream>
 #include <random>
 #include <string>
+#include <vector>
 #include <unistd.h>
+
+#include <cuda_runtime.h>
 
 #include <clutra.hpp>
 
@@ -75,12 +78,23 @@ clutra::formats::CSR<ValueT, IndexT, OffsetT> readCSR(const GraphOptions& opts, 
 }
 
 template<typename T>
-void printFrontier(T& f, std::string prefix = "") {
-  using type_t = typename T::type_t;
-  auto size = f.getBitmapSize() * f.getBitmapRange();
+void printFrontier(const T& frontier, std::string prefix = "") {
+  using bitmap_type = typename T::bitmap_type;
+  const auto words = frontier.getBitmapSize();
+  if (words == 0) {
+    std::cout << prefix << "<empty frontier>" << std::endl;
+    return;
+  }
+  std::vector<bitmap_type> host(words);
+  CUDA_CHECK(cudaMemcpy(host.data(), frontier.getDeviceFrontier().getData(), words * sizeof(bitmap_type), cudaMemcpyDeviceToHost));
+  const auto range = frontier.getBitmapRange();
   std::cout << prefix;
-  for (int i = size - 1; i >= 0; --i) { std::cout << (f.check(static_cast<type_t>(i)) ? "1" : "0"); }
-  std::cout << " [" << f.getDeviceFrontier().get_data()[0] << "]" << std::endl;
+  for (int bit = static_cast<int>(words * range) - 1; bit >= 0; --bit) {
+    const auto word_idx = static_cast<size_t>(bit) / range;
+    const auto offset = static_cast<size_t>(bit) % range;
+    const auto is_set = (host[word_idx] >> offset) & static_cast<bitmap_type>(1);
+    std::cout << (is_set ? "1" : "0");
+  }
   std::cout << std::endl;
 }
 

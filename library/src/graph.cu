@@ -10,6 +10,17 @@
 
 using namespace clutra::graph;
 
+namespace {
+template<typename IndexT, typename OffsetT, typename ValueT>
+void resetDeviceGraph(clutra::graph::detail::GraphCSRDevice<IndexT, OffsetT, ValueT>& device_graph) {
+  device_graph._n_rows = 0;
+  device_graph._n_nonzeros = 0;
+  device_graph._column_indices = nullptr;
+  device_graph._row_offsets = nullptr;
+  device_graph._nnz_values = nullptr;
+}
+} // namespace
+
 template<typename IndexT, typename OffsetT, typename ValueT>
 GraphCSR<IndexT, OffsetT, ValueT>::GraphCSR(clutra::formats::CSR<ValueT, IndexT, OffsetT>& csr, Properties properties)
     : _csr(csr), _properties(properties) {
@@ -46,6 +57,18 @@ GraphCSR<IndexT, OffsetT, ValueT>::GraphCSR(clutra::formats::CSR<ValueT, IndexT,
   } else {
     this->_inverse_device_graph = this->_device_graph;
   }
+}
+
+template<typename IndexT, typename OffsetT, typename ValueT>
+GraphCSR<IndexT, OffsetT, ValueT>::GraphCSR(GraphCSR&& other) noexcept
+    : _csr(other._csr), _properties(other._properties), _device_graph(other._device_graph), _inverse_device_graph(other._inverse_device_graph) {
+  resetDeviceGraph(other._device_graph);
+  if (_properties.directed) {
+    resetDeviceGraph(other._inverse_device_graph);
+  } else {
+    other._inverse_device_graph = {};
+  }
+  other._properties = {};
 }
 
 template<typename IndexT, typename OffsetT, typename ValueT>
