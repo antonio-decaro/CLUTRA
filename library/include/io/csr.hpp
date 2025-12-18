@@ -10,7 +10,7 @@
 #include <iostream>
 #include <sstream>
 #include <utils/types.hpp>
-#include <graph/properties.cuh>
+#include <graph/properties.hpp>
 
 namespace clutra {
 namespace formats {

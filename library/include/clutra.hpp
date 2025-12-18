@@ -11,7 +11,7 @@
 
 // Graph
 #include <graph/graph.cuh>
-#include <graph/properties.cuh>
+#include <graph/properties.hpp>
 
 // Operators
 #include <operators/advance/advance.cuh>

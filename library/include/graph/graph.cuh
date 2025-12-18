@@ -7,7 +7,7 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <graph/properties.cuh>
+#include <graph/properties.hpp>
 #include <io/csr.hpp>
 
 namespace clutra::graph {
