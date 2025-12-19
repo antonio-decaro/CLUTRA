@@ -24,7 +24,7 @@ concept DeviceGraphConcept = requires(DeviceGraphT g) {
 template<typename GraphT>
 concept GraphConcept = requires(GraphT g) {
   { g.getDeviceGraph() };
-  { g.getInverseDeviceGraph() };
+  { g.getTransposedDeviceGraph() };
   { g.getProperties() } -> std::convertible_to<Properties>;
 } && detail::DeviceGraphConcept<GraphT>;
 
