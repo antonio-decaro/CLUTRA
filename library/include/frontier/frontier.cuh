@@ -14,6 +14,11 @@ namespace clutra::frontier {
 
 namespace detail {
 
+// Null frontier used when the caller does not want to store traversal output.
+struct NullFrontierDevice {
+  __host__ __device__ void insert(uint32_t) const noexcept {}
+};
+
 template<typename T, size_t Levels, typename B = clutra::detail::types::bitmap_type_t>
 class MLBDevice {
 public:
@@ -126,7 +131,7 @@ protected:
 
 } // namespace detail 
 
-template<typename T, size_t Levels = 2>
+template<typename T = uint32_t, size_t Levels = 2>
 class FrontierMLB {
 public:
   using bitmap_type = typename detail::MLBDevice<T, Levels>::bitmap_type;

@@ -21,6 +21,7 @@ if (ENABLE_PROFILING)
 endif()
 
 # Public include directory
+target_compile_features(clutra PUBLIC cxx_std_20)
 target_include_directories(clutra PUBLIC
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/include>
   $<INSTALL_INTERFACE:include>
@@ -32,7 +33,7 @@ if(NOT _clutra_type STREQUAL "INTERFACE_LIBRARY")
   set_target_properties(clutra PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
-    CUDA_STANDARD 14
+    CUDA_STANDARD 20
     CUDA_STANDARD_REQUIRED ON
   )
 

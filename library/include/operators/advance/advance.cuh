@@ -8,147 +8,35 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <graph/graph.cuh>
+#include <graph/concept.hpp>
+#include <operators/advance/advance_mlb.cuh>
 #include <frontier/frontier.cuh>
 #include <utils/profile.cuh>
 #include <utils/device.cuh>
-
-
+#include <concepts>
 
 namespace clutra::operators::advance {
 
-namespace detail {
-
-template<typename GraphDevT, typename FrontierDevT, typename LambdaT>
-__device__ inline void processVertexRange(GraphDevT graph_dev,
-                                          FrontierDevT out_dev_frontier,
-                                          LambdaT functor,
-                                          uint32_t vertex,
-                                          uint32_t degree,
-                                          uint32_t lane,
-                                          uint32_t stride) {
-  auto start = graph_dev.begin(vertex);
-  for (uint32_t edge_offset = lane; edge_offset < degree; edge_offset += stride) {
-    auto n = start + edge_offset;
-    const auto edge = n.getIndex();
-    const auto weight = graph_dev.getEdgeWeight(edge);
-    const auto neighbor = *n;
-    if (functor(vertex, neighbor, edge, weight)) {
-      out_dev_frontier.insert(neighbor);
-    }
-  }
+template<clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
+void push(const GraphT& graph, const clutra::frontier::FrontierMLB<>& input_frontier, clutra::frontier::FrontierMLB<>& output_frontier, LambdaT&& functor) {
+  detail::launchKernel(graph, input_frontier, &output_frontier, std::forward<LambdaT>(functor));
 }
 
-template<size_t BlockSize, typename GraphDevT, typename FrontierDevT, typename LambdaT>
-__global__ void advanceKernel(GraphDevT graph_dev, FrontierDevT in_dev_frontier, FrontierDevT out_dev_frontier,int coarsening_factor, LambdaT functor) {
-  constexpr int WARP_SIZE = 32;
-  static_assert(BlockSize % WARP_SIZE == 0, "BlockSize must be multiple of warp size");
-
-  __shared__ uint32_t n_edges_cta[BlockSize];
-  __shared__ uint32_t n_edges_warp[BlockSize];
-  __shared__ uint32_t warp_reduce[BlockSize];
-  __shared__ uint32_t warp_reduce_tail[BlockSize / WARP_SIZE];
-  __shared__ uint32_t cta_reduce[BlockSize];
-  __shared__ uint32_t cta_reduce_tail;
-  __shared__ uint32_t thread_reduce_vertices[BlockSize];
-  __shared__ uint32_t thread_reduce_degrees[BlockSize];
-  __shared__ uint32_t thread_reduce_tail[BlockSize / WARP_SIZE];
-  
-  // fetch frontier info
-  const int lane = threadIdx.x % WARP_SIZE;
-  const int warp_id = threadIdx.x / WARP_SIZE;
-  const int offsets_size = in_dev_frontier.getOffsetsSize()[0];
-  const uint16_t bitmap_range = in_dev_frontier.getBitmapRange();
-  const int* bitmap_offsets = in_dev_frontier.getOffsets();
-
-  // fetch assigned vertex
-  const uint32_t actual_id_offset = (blockIdx.x * coarsening_factor) + (threadIdx.x / bitmap_range);
-  uint32_t assigned_vertex;
-  if (actual_id_offset < offsets_size) {
-    assigned_vertex = (bitmap_offsets[actual_id_offset] * bitmap_range) + (threadIdx.x % bitmap_range);
-  } else {
-    assigned_vertex = UINT32_MAX;
-  }
-
-  // init computation
-  if (lane == 0) {
-    warp_reduce_tail[warp_id] = 0;
-    thread_reduce_tail[warp_id] = 0;
-  }
-  if (threadIdx.x == 0) cta_reduce_tail = 0;
-
-  __syncthreads();
-
-  // classify vertices by degree
-  const uint32_t warp_offset = warp_id * WARP_SIZE;
-  const bool vertex_active = assigned_vertex < graph_dev.getVertexCount() && in_dev_frontier.check(assigned_vertex);
-  if (vertex_active) {
-    const uint32_t n_edges = graph_dev.getDegree(assigned_vertex);
-    const uint32_t cta_threshold = blockDim.x * blockDim.x;
-    if (n_edges >= cta_threshold) {
-      const uint32_t loc = atomicAdd(&cta_reduce_tail, 1);
-      n_edges_cta[loc] = n_edges;
-      cta_reduce[loc] = assigned_vertex;
-    } else if (n_edges >= WARP_SIZE) {
-      const uint32_t loc = atomicAdd(&warp_reduce_tail[warp_id], 1);
-      n_edges_warp[warp_offset + loc] = n_edges;
-      warp_reduce[warp_offset + loc] = assigned_vertex;
-    } else {
-      const int loc = atomicAdd(&thread_reduce_tail[warp_id], 1);
-      const int write_idx = warp_offset + loc;
-      thread_reduce_vertices[write_idx] = assigned_vertex;
-      thread_reduce_degrees[write_idx] = n_edges;
-    }
-  }
-
-  __syncthreads();
-
-  // process CTA large degree vertices
-  for (int i = 0; i < cta_reduce_tail; ++i) {
-    processVertexRange(graph_dev, out_dev_frontier, functor, cta_reduce[i], n_edges_cta[i], threadIdx.x, blockDim.x);
-  }
-  
-  // process warp large degree vertices
-  for (int i = 0; i < warp_reduce_tail[warp_id]; ++i) {
-    processVertexRange(graph_dev, out_dev_frontier, functor, warp_reduce[warp_offset + i], n_edges_warp[warp_offset + i], lane, WARP_SIZE);
-  }
-
-  // process small degree vertices
-  const uint32_t tiny_tail = thread_reduce_tail[warp_id];
-  for (int i = 0; i < tiny_tail; ++i) {
-    const int tiny_idx = warp_offset + i;
-    processVertexRange(graph_dev, out_dev_frontier, functor, thread_reduce_vertices[tiny_idx], thread_reduce_degrees[tiny_idx], lane, WARP_SIZE);
-  }
-
+// Overload for advance when no output frontier is needed (e.g., counting-only or side-effect functors).
+template<clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
+void push(const GraphT& graph, const clutra::frontier::FrontierMLB<>& input_frontier, LambdaT&& functor) {
+  detail::launchKernel(graph, input_frontier, nullptr, std::forward<LambdaT>(functor));
 }
 
-} // namespace clutra::operators::advance::detail
-
-template<typename GraphT, typename FrontierT, typename LambdaT>
-void frontier(const GraphT& graph, const FrontierT& input_frontier, FrontierT& output_frontier, LambdaT&& functor) {
-  constexpr size_t CU_SIZE = 256;
-  auto in_dev_frontier = input_frontier.getDeviceFrontier();
-  auto out_dev_frontier = output_frontier.getDeviceFrontier();
-  auto graph_dev = graph.getDeviceGraph();
-
-  input_frontier.computeActiveFrontier();
-
-  // compute launch informations
-  const size_t coarsening_factor = CU_SIZE  / 32 /* Warp Size */;
-  const size_t bitmap_range = in_dev_frontier.getBitmapRange();
-  if (bitmap_range != 32) {
-    throw std::runtime_error("Advance operator currently supports only frontiers with bitmap range equal to 32.");
-  }
-  const size_t active_size = input_frontier.getActiveFrontierSize();
-
-  const size_t block_size = CU_SIZE;
-  const size_t grid_size = ((active_size * bitmap_range) + block_size - 1) / block_size;
-
-  // launch advance kernel
-  clutra::profile::KernelProfiler profiler("advanceKernel");
-  detail::advanceKernel<CU_SIZE><<<grid_size, block_size>>>(graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, std::forward<LambdaT>(functor));
-  CUDA_CHECK(cudaDeviceSynchronize());
-  profiler.stop();
+template<typename IndexT, typename OffsetT, typename ValueT, typename LambdaT>
+void pull(const clutra::graph::GraphCSR<IndexT, OffsetT, ValueT>& graph, const clutra::frontier::FrontierMLB<>& input_frontier, clutra::frontier::FrontierMLB<>& output_frontier, LambdaT&& functor) {
+  throw std::runtime_error("Pull advance is not supported for MLB frontiers.");
 }
 
+// Overload for advance when no output frontier is needed (e.g., counting-only or side-effect functors).
+template<typename IndexT, typename OffsetT, typename ValueT, typename LambdaT>
+void pull(const clutra::graph::GraphCSR<IndexT, OffsetT, ValueT>& graph, const clutra::frontier::FrontierMLB<>& input_frontier, LambdaT&& functor) {
+  throw std::runtime_error("Pull advance is not supported for MLB frontiers.");
+}
 
 }// namespace clutra::operators::advance

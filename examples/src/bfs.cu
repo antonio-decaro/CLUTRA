@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
   
   std::cout << "[*] Running BFS from source vertex " << opts.source << std::endl;
   while (!in_frontier.empty()) {
-    clutra::operators::advance::frontier(graph, in_frontier, out_frontier,
+    clutra::operators::advance::push(graph, in_frontier, out_frontier,
       [iter, distances] __device__ (auto u, auto v, auto e, auto w) {
         if (distances[v] == -1) {
           distances[v] = iter + 1;

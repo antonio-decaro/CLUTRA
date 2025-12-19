@@ -36,9 +36,11 @@ foreach(example_src ${EXAMPLE_SRCS})
   set_target_properties(${target_name} PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
-    CUDA_STANDARD 17
+    CUDA_STANDARD 20
     CUDA_STANDARD_REQUIRED ON
   )
+
+  target_compile_features(${target_name} PRIVATE cxx_std_20)
 
   # Link against the library target and CUDA runtime
   target_link_libraries(${target_name} PRIVATE clutra CLI11::CLI11)
