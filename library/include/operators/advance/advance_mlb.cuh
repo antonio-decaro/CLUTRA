@@ -5,6 +5,7 @@
 #include <graph/graph.cuh>
 #include <graph/concept.hpp>
 #include <frontier/frontier.cuh>
+#include <optional>
 #include <utils/profile.cuh>
 #include <utils/device.cuh>
 #include <concepts>
@@ -126,7 +127,7 @@ __global__ void advanceKernel(GraphDevT graph_dev,
 template<clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
 void launchKernel(const GraphT& graph,
                   const clutra::frontier::FrontierMLB<>& input_frontier,
-                  clutra::frontier::FrontierMLB<>* output_frontier,
+                  std::optional<clutra::frontier::FrontierMLB<>> output_frontier,
                   LambdaT&& functor) {
   constexpr size_t CU_SIZE = 256;
   auto in_dev_frontier = input_frontier.getDeviceFrontier();
@@ -148,8 +149,8 @@ void launchKernel(const GraphT& graph,
   // launch advance kernel
   clutra::profile::KernelProfiler profiler("advanceKernel");
 
-  if (output_frontier) {
-    auto out_dev_frontier = output_frontier->getDeviceFrontier();
+  if (output_frontier.has_value()) {
+    auto out_dev_frontier = output_frontier.value().getDeviceFrontier();
     detail::advanceKernel<CU_SIZE><<<grid_size, block_size>>>(graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, std::forward<LambdaT>(functor));
   } else {
     // Use a null frontier when the caller does not need to store output.
