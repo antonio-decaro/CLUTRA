@@ -154,7 +154,7 @@ public:
 
   const auto& getDeviceGraph() const { return _device_graph; }
 
-  auto& getTransposedDeviceGraph() { return _inverse_device_graph; }
+  const auto& getTransposedDeviceGraph() const { return _inverse_device_graph; }
 
   /* Override superclass methods */
 
