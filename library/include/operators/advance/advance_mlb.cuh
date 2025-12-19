@@ -5,7 +5,7 @@
 #include <graph/graph.cuh>
 #include <graph/concept.hpp>
 #include <frontier/frontier.cuh>
-#include <optional>
+#include <memory>
 #include <utils/profile.cuh>
 #include <utils/device.cuh>
 #include <concepts>
@@ -33,16 +33,16 @@ __device__ inline void processVertexRange(GraphDevT graph_dev,
 }
 
 template<typename FronterDevT>
-__device__ __forceinline__ uint32_t getAssignedVertex(const FronterDevT& in_dev_frontier, uint32_t coarsening_factor) {
+__device__ uint32_t getAssignedVertex(const FronterDevT& in_dev_frontier, uint32_t coarsening_factor, uint32_t gid, uint32_t tid) {
   const int offsets_size = in_dev_frontier.getOffsetsSize()[0];
   const uint16_t bitmap_range = in_dev_frontier.getBitmapRange();
   const int* bitmap_offsets = in_dev_frontier.getOffsets();
 
   // fetch assigned vertex
-  const uint32_t actual_id_offset = (blockIdx.x * coarsening_factor) + (threadIdx.x / bitmap_range);
+  const uint32_t actual_id_offset = (gid * coarsening_factor) + (tid / bitmap_range);
   uint32_t assigned_vertex;
   if (actual_id_offset < offsets_size) {
-    assigned_vertex = (bitmap_offsets[actual_id_offset] * bitmap_range) + (threadIdx.x % bitmap_range);
+    assigned_vertex = (bitmap_offsets[actual_id_offset] * bitmap_range) + (tid % bitmap_range);
   } else {
     assigned_vertex = UINT32_MAX;
   }
@@ -71,7 +71,7 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   // fetch frontier info
   const int warp_id = threadIdx.x / WARP_SIZE;
   const int lane = threadIdx.x % WARP_SIZE;
-  uint32_t assigned_vertex = getAssignedVertex(in_dev_frontier, coarsening_factor);
+  uint32_t assigned_vertex = getAssignedVertex(in_dev_frontier, coarsening_factor, blockIdx.x, threadIdx.x);
 
   // init computation
   if (lane == 0) {
@@ -127,7 +127,7 @@ __global__ void advanceKernel(GraphDevT graph_dev,
 template<clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
 void launchKernel(const GraphT& graph,
                   const clutra::frontier::FrontierMLB<>& input_frontier,
-                  std::optional<clutra::frontier::FrontierMLB<>> output_frontier,
+                  clutra::frontier::FrontierMLB<>* output_frontier,
                   LambdaT&& functor) {
   constexpr size_t CU_SIZE = 256;
   auto in_dev_frontier = input_frontier.getDeviceFrontier();
@@ -149,8 +149,9 @@ void launchKernel(const GraphT& graph,
   // launch advance kernel
   clutra::profile::KernelProfiler profiler("advanceKernel");
 
-  if (output_frontier.has_value()) {
-    auto out_dev_frontier = output_frontier.value().getDeviceFrontier();
+  if (output_frontier != nullptr) {
+    auto out_dev_frontier = output_frontier->getDeviceFrontier();
+
     detail::advanceKernel<CU_SIZE><<<grid_size, block_size>>>(graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, std::forward<LambdaT>(functor));
   } else {
     // Use a null frontier when the caller does not need to store output.
