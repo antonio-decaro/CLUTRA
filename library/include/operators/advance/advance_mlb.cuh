@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 University of Salerno
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 #pragma once
 
 #include <cuda.h>
@@ -5,6 +10,7 @@
 #include <graph/graph.cuh>
 #include <graph/concept.hpp>
 #include <frontier/frontier.cuh>
+#include <operators/advance/options.hpp>
 #include <memory>
 #include <utils/profile.cuh>
 #include <utils/device.cuh>
@@ -12,7 +18,7 @@
 
 namespace clutra::operators::advance::detail {
 
-template<graph::detail::DeviceGraphConcept GraphDevT, typename FrontierDevT, typename LambdaT>
+template<advance_direction Direction, graph::detail::DeviceGraphConcept GraphDevT, typename FrontierDevT, typename LambdaT>
 __device__ inline void processVertexRange(GraphDevT graph_dev,
                                           FrontierDevT out_dev_frontier,
                                           LambdaT functor,
@@ -26,8 +32,14 @@ __device__ inline void processVertexRange(GraphDevT graph_dev,
     const auto edge = n.getIndex();
     const auto weight = graph_dev.getEdgeWeight(edge);
     const auto neighbor = *n;
-    if (functor(vertex, neighbor, edge, weight)) {
-      out_dev_frontier.insert(neighbor);
+    if constexpr (Direction == advance_direction::push) {
+      if (functor(vertex, neighbor, edge, weight)) {
+        out_dev_frontier.insert(neighbor);
+      }
+    } else {
+      if (functor(neighbor, vertex, edge, weight)) {
+        out_dev_frontier.insert(vertex);
+      }
     }
   }
 }
@@ -49,7 +61,16 @@ __device__ uint32_t getAssignedVertex(const FronterDevT& in_dev_frontier, uint32
   return assigned_vertex;
 }
 
-template<size_t BlockSize, graph::detail::DeviceGraphConcept GraphDevT, typename InFrontierDevT, typename OutFrontierDevT, typename LambdaT>
+template<advance_direction Direction, typename FrontierDevT>
+__device__ __forceinline__ bool checkVertexActive(const FrontierDevT& in_dev_frontier, uint32_t vertex) {
+  if constexpr (Direction == advance_direction::push) {
+    return in_dev_frontier.check(vertex);
+  } else {
+    return !in_dev_frontier.check(vertex);
+  }
+}
+
+template<advance_direction Direction, size_t BlockSize, graph::detail::DeviceGraphConcept GraphDevT, typename InFrontierDevT, typename OutFrontierDevT, typename LambdaT>
 __global__ void advanceKernel(GraphDevT graph_dev,
                               InFrontierDevT in_dev_frontier,
                               OutFrontierDevT out_dev_frontier,
@@ -108,32 +129,33 @@ __global__ void advanceKernel(GraphDevT graph_dev,
 
   // process CTA large degree vertices
   for (int i = 0; i < cta_reduce_tail; ++i) {
-    processVertexRange(graph_dev, out_dev_frontier, functor, cta_reduce[i], n_edges_cta[i], threadIdx.x, blockDim.x);
+    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, cta_reduce[i], n_edges_cta[i], threadIdx.x, blockDim.x);
   }
   
   // process warp large degree vertices
   for (int i = 0; i < warp_reduce_tail[warp_id]; ++i) {
-    processVertexRange(graph_dev, out_dev_frontier, functor, warp_reduce[warp_offset + i], n_edges_warp[warp_offset + i], lane, WARP_SIZE);
+    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, warp_reduce[warp_offset + i], n_edges_warp[warp_offset + i], lane, WARP_SIZE);
   }
 
   // process small degree vertices
   const uint32_t tiny_tail = thread_reduce_tail[warp_id];
   for (int i = 0; i < tiny_tail; ++i) {
     const int tiny_idx = warp_offset + i;
-    processVertexRange(graph_dev, out_dev_frontier, functor, thread_reduce_vertices[tiny_idx], thread_reduce_degrees[tiny_idx], lane, WARP_SIZE);
+    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, thread_reduce_vertices[tiny_idx], thread_reduce_degrees[tiny_idx], lane, WARP_SIZE);
   }
 }
 
-template<clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
+template<advance_direction Direction, clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
 void launchKernel(const GraphT& graph,
                   const clutra::frontier::FrontierMLB<>& input_frontier,
                   clutra::frontier::FrontierMLB<>* output_frontier,
                   LambdaT&& functor) {
   constexpr size_t CU_SIZE = 256;
   auto in_dev_frontier = input_frontier.getDeviceFrontier();
-  auto graph_dev = graph.getDeviceGraph();
+  auto graph_dev = (Direction == advance_direction::pull) ? graph.getTransposedDeviceGraph() : graph.getDeviceGraph();
 
-  input_frontier.computeActiveFrontier();
+  const bool invert = (Direction == advance_direction::pull); // In pull mode, we consider inactive vertices as active.
+  input_frontier.computeActiveFrontier(invert);
 
   // compute launch informations
   const size_t coarsening_factor = CU_SIZE  / 32 /* Warp Size */;
@@ -152,10 +174,10 @@ void launchKernel(const GraphT& graph,
   if (output_frontier != nullptr) {
     auto out_dev_frontier = output_frontier->getDeviceFrontier();
 
-    detail::advanceKernel<CU_SIZE><<<grid_size, block_size>>>(graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, std::forward<LambdaT>(functor));
+    detail::advanceKernel<Direction, CU_SIZE><<<grid_size, block_size>>>(graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, std::forward<LambdaT>(functor));
   } else {
     // Use a null frontier when the caller does not need to store output.
-    detail::advanceKernel<CU_SIZE><<<grid_size, block_size>>>(graph_dev, in_dev_frontier, frontier::detail::NullFrontierDevice{}, coarsening_factor, std::forward<LambdaT>(functor));
+    detail::advanceKernel<Direction, CU_SIZE><<<grid_size, block_size>>>(graph_dev, in_dev_frontier, frontier::detail::NullFrontierDevice{}, coarsening_factor, std::forward<LambdaT>(functor));
   }
 
   CUDA_CHECK(cudaDeviceSynchronize());
