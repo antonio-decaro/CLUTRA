@@ -6,6 +6,7 @@
 #pragma once
 
 #include <utils/types.hpp>
+#include <graph/concept.hpp>
 #include <utils/misc.cuh>
 #include <algorithm>
 #include <cuda.h>
@@ -13,6 +14,29 @@
 namespace clutra::frontier {
 
 namespace detail {
+
+struct ActiveFrontierStatus {
+  bool inverted_computed = false;
+  bool normal_computed = false;
+
+  __host__ void reset() {
+    inverted_computed = false;
+    normal_computed = false;
+  }
+
+  __host__ bool isComputed(bool invert) const {
+    return invert ? inverted_computed : normal_computed;
+  }
+
+  __host__ void setComputed(bool invert) {
+    inverted_computed = invert;
+    normal_computed = !invert;
+  }
+
+  __host__ bool isAnyComputed() const {
+    return inverted_computed || normal_computed;
+  }
+};
 
 // Null frontier used when the caller does not want to store traversal output.
 struct NullFrontierDevice {
@@ -153,24 +177,29 @@ public:
   bool remove(size_t idx);
   size_t size() const;
 
-  FrontierMLB& operator=(const FrontierMLB& other);
-  FrontierMLB& operator=(FrontierMLB&& other) noexcept;
-  void merge(FrontierMLB<T>& other);
-  void intersect(FrontierMLB<T>& other);
+  template<clutra::graph::detail::GraphConcept GraphT>
+  size_t getOutDegree(const GraphT& graph);
+
+  FrontierMLB<T, Levels>& operator=(const FrontierMLB<T, Levels>& other);
+  FrontierMLB<T, Levels>& operator=(FrontierMLB<T, Levels>&& other) noexcept;
+  void merge(FrontierMLB<T, Levels>& other);
+  void intersect(FrontierMLB<T, Levels>& other);
   void clear();
 
   const DeviceFrontier& getDeviceFrontier() const { return _bitmap; }
-  void computeActiveFrontier(bool invert = false) const;
+  void computeActiveFrontier(bool invert = false);
   size_t getActiveFrontierSize() const;
 
   static void swap(FrontierMLB<T, Levels>& first, FrontierMLB<T, Levels>& second) {
     using std::swap;
     swap(first._bitmap, second._bitmap);
     swap(first._host_offsets_size, second._host_offsets_size);
+    swap(first._active_frontier_status, second._active_frontier_status);
   }
 
 protected:
   DeviceFrontier _bitmap; ///< The bitmap.
+  detail::ActiveFrontierStatus _active_frontier_status; ///< Status of the active frontier computation.
   uint32_t* _host_offsets_size = nullptr; ///< Host-pinned mirror of offsets_size.
 };
 

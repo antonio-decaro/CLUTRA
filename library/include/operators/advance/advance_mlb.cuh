@@ -147,7 +147,7 @@ __global__ void advanceKernel(GraphDevT graph_dev,
 
 template<advance_direction Direction, clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
 void launchKernel(const GraphT& graph,
-                  const clutra::frontier::FrontierMLB<>& input_frontier,
+                  clutra::frontier::FrontierMLB<>& input_frontier,
                   clutra::frontier::FrontierMLB<>* output_frontier,
                   LambdaT&& functor) {
   constexpr size_t CU_SIZE = 256;

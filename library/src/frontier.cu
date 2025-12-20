@@ -4,6 +4,7 @@
  */
 
 #include <frontier/frontier.cuh>
+#include <graph/graph.cuh>
 #include <utils/profile.cuh>
 #include <stdexcept>
 #include <type_traits>
@@ -12,6 +13,7 @@
 #include <thrust/device_ptr.h>
 #include <thrust/transform_reduce.h>
 #include <thrust/execution_policy.h>
+#include <thrust/iterator/counting_iterator.h>
 
 namespace clutra::frontier {
 
@@ -140,6 +142,8 @@ FrontierMLB<T, Levels>::FrontierMLB(FrontierMLB&& other) noexcept : _bitmap(othe
   other._bitmap.setOffsets(nullptr);
   other._bitmap.setOffsetsSize(nullptr);
   other._host_offsets_size = nullptr;
+  this->_active_frontier_status = other._active_frontier_status;
+  other._active_frontier_status.reset();
 }
 
 template<typename T, size_t Levels>
@@ -156,6 +160,7 @@ FrontierMLB<T, Levels>::~FrontierMLB() {
     CUDA_CHECK(cudaFreeHost(_host_offsets_size));
     _host_offsets_size = nullptr;
   }
+  this->_active_frontier_status.reset();
 }
 
 template<typename T, size_t Levels>
@@ -191,6 +196,7 @@ bool FrontierMLB<T, Levels>::check(size_t idx) const {
 
 template<typename T, size_t Levels>
 bool FrontierMLB<T, Levels>::insert(size_t idx) {
+  this->_active_frontier_status.reset();
   auto bitmap = this->getDeviceFrontier();
   clutra::profile::KernelProfiler profiler("insertKernel", "operational");
   clutra::detail::kernels::executeKernel<<<1, 1>>>([=] __device__() { bitmap.insert(idx); });
@@ -202,6 +208,7 @@ bool FrontierMLB<T, Levels>::insert(size_t idx) {
 
 template<typename T, size_t Levels>
 bool FrontierMLB<T, Levels>::remove(size_t idx) {
+  this->_active_frontier_status.reset();
   auto bitmap = this->getDeviceFrontier();
   clutra::profile::KernelProfiler profiler("removeKernel", "operational");
   clutra::detail::kernels::executeKernel<<<1, 1>>>([=] __device__() { bitmap.remove(idx); });
@@ -267,6 +274,7 @@ FrontierMLB<T, Levels>& FrontierMLB<T, Levels>::operator=(const FrontierMLB& oth
       *_host_offsets_size = host_value;
     }
   }
+  this->_active_frontier_status = other._active_frontier_status;
   return *this;
 }
 
@@ -280,7 +288,8 @@ FrontierMLB<T, Levels>& FrontierMLB<T, Levels>::operator=(FrontierMLB&& other) n
 }
 
 template<typename T, size_t Levels>
-void FrontierMLB<T, Levels>::merge(FrontierMLB<T>& other) {
+void FrontierMLB<T, Levels>::merge(FrontierMLB<T, Levels>& other) {
+  this->_active_frontier_status.reset();
   clutra::profile::KernelProfiler profiler("mergeLevelKernel", "operational");
   for (size_t level = 0; level < Levels; ++level) {
     size_t n = _bitmap.getBitmapSize(level);
@@ -304,7 +313,8 @@ void FrontierMLB<T, Levels>::merge(FrontierMLB<T>& other) {
 }
 
 template<typename T, size_t Levels>
-void FrontierMLB<T, Levels>::intersect(FrontierMLB<T>& other) {
+void FrontierMLB<T, Levels>::intersect(FrontierMLB<T, Levels>& other) {
+  this->_active_frontier_status.reset();
   clutra::profile::KernelProfiler profiler("intersectMLBFrontierKernel", "operational");
   for (size_t level = 0; level < Levels; ++level) {
     size_t n = _bitmap.getBitmapSize(level);
@@ -329,6 +339,7 @@ void FrontierMLB<T, Levels>::intersect(FrontierMLB<T>& other) {
 
 template<typename T, size_t Levels>
 void FrontierMLB<T, Levels>::clear() {
+  this->_active_frontier_status.reset();
   clutra::profile::KernelProfiler profiler("clearKernel", "core");
 #pragma unroll
   for (size_t i = 0; i < Levels; i++) {
@@ -341,7 +352,11 @@ void FrontierMLB<T, Levels>::clear() {
 }
 
 template<typename T, size_t Levels>
-void FrontierMLB<T, Levels>::computeActiveFrontier(bool invert) const {
+void FrontierMLB<T, Levels>::computeActiveFrontier(bool invert) {
+  if (_active_frontier_status.isComputed(invert)) {
+    return;
+  }
+  _active_frontier_status.setComputed(invert);
   auto bitmap = this->getDeviceFrontier();
   size_t level_size = bitmap.getBitmapSize(1);
   uint32_t range = bitmap.getBitmapRange();
@@ -364,6 +379,9 @@ void FrontierMLB<T, Levels>::computeActiveFrontier(bool invert) const {
 
 template<typename T, size_t Levels>
 size_t FrontierMLB<T, Levels>::getActiveFrontierSize() const {
+  if (!this->_active_frontier_status.isAnyComputed()) {
+    throw std::runtime_error("Active frontier has not been computed yet.");
+  }
   auto bitmap = this->getDeviceFrontier();
   clutra::profile::KernelProfiler profiler("getActiveFrontierSize", "core");
   if (_host_offsets_size != nullptr) {
@@ -374,8 +392,70 @@ size_t FrontierMLB<T, Levels>::getActiveFrontierSize() const {
   return static_cast<size_t>(value);
 }
 
+template<typename T, size_t Levels>
+template<clutra::graph::detail::GraphConcept GraphT>
+size_t FrontierMLB<T, Levels>::getOutDegree(const GraphT& graph) {
+  if (!this->_active_frontier_status.isComputed(false)) {
+    this->computeActiveFrontier(false);
+  }
+  auto bitmap = this->getDeviceFrontier();
+  const auto device_graph = graph.getDeviceGraph();
+  const uint32_t frontier_size = bitmap.getBitmapSize();
+  const uint32_t range = bitmap.getBitmapRange();
+  const uint32_t num_elems = bitmap.getNumElems();
+  const uint32_t active_frontier_size = this->getActiveFrontierSize();
+
+  if (frontier_size == 0 || range == 0) {
+    return 0;
+  }
+
+  auto count_out_degree = [=] __device__(uint32_t active_idx) {
+    const uint32_t word_idx = bitmap.getOffsets()[active_idx];
+    bitmap_type word = bitmap.getData()[word_idx];
+    if (word == static_cast<bitmap_type>(0)) {
+      return static_cast<size_t>(0);
+    }
+
+    size_t local_sum = 0;
+    const uint32_t base_vertex = word_idx * range;
+    for (uint32_t bit = 0; bit < range; ++bit) {
+      uint32_t vertex = base_vertex + bit;
+      if (vertex >= num_elems) {
+        break;
+      }
+      if (word & (static_cast<bitmap_type>(1) << bit)) {
+        local_sum += device_graph.getDegree(static_cast<typename decltype(device_graph)::vertex_t>(vertex));
+      }
+    }
+    return local_sum;
+  };
+
+  clutra::profile::KernelProfiler profiler("getOutDegree", "core");
+  size_t total_out_degree = thrust::transform_reduce(
+      thrust::device,
+      thrust::make_counting_iterator<uint32_t>(0),
+      thrust::make_counting_iterator<uint32_t>(active_frontier_size),
+      count_out_degree,
+      static_cast<size_t>(0),
+      thrust::plus<size_t>());
+  profiler.stop();
+  return total_out_degree;
+
+}
+
 } // namespace clutra::frontier
 
 // Explicit instantiation(s) for commonly used template arguments
 template class clutra::frontier::FrontierMLB<uint32_t, 2>;
 template class clutra::frontier::FrontierMLB<uint64_t, 2>;
+
+// Explicit instantiation(s) for templated member functions
+#define CLUTRA_INSTANTIATE_GET_OUT_DEGREE(FrontierT, IndexT, ValT) \
+  template size_t clutra::frontier::FrontierMLB<FrontierT, 2>::getOutDegree<clutra::graph::GraphCSR<IndexT, IndexT, ValT>>(const clutra::graph::GraphCSR<IndexT, IndexT, ValT>&);
+
+CLUTRA_INSTANTIATE_GET_OUT_DEGREE(uint32_t, uint32_t, float)
+CLUTRA_INSTANTIATE_GET_OUT_DEGREE(uint32_t, uint32_t, double)
+CLUTRA_INSTANTIATE_GET_OUT_DEGREE(uint64_t, uint64_t, float)
+CLUTRA_INSTANTIATE_GET_OUT_DEGREE(uint64_t, uint64_t, double)
+
+#undef CLUTRA_INSTANTIATE_GET_OUT_DEGREE
