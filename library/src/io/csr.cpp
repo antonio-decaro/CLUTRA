@@ -5,6 +5,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <algorithm>
 
 
 template<typename ValueT, typename IndexT, typename OffsetT>

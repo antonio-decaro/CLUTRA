@@ -199,7 +199,7 @@ bool FrontierMLB<T, Levels>::insert(size_t idx) {
   this->_active_frontier_status.reset();
   auto bitmap = this->getDeviceFrontier();
   clutra::profile::KernelProfiler profiler("insertKernel", "operational");
-  clutra::detail::kernels::executeKernel<<<1, 1>>>([=] __device__() { bitmap.insert(idx); });
+  clutra::detail::kernels::executeKernel<<<1, 1>>>([=] __device__() -> void { bitmap.insert(idx); });
   CUDA_CHECK(cudaGetLastError());
   CUDA_CHECK(cudaDeviceSynchronize());
   profiler.stop();
@@ -211,7 +211,7 @@ bool FrontierMLB<T, Levels>::remove(size_t idx) {
   this->_active_frontier_status.reset();
   auto bitmap = this->getDeviceFrontier();
   clutra::profile::KernelProfiler profiler("removeKernel", "operational");
-  clutra::detail::kernels::executeKernel<<<1, 1>>>([=] __device__() { bitmap.remove(idx); });
+  clutra::detail::kernels::executeKernel<<<1, 1>>>([=] __device__() -> void { bitmap.remove(idx); });
   CUDA_CHECK(cudaGetLastError());
   CUDA_CHECK(cudaDeviceSynchronize());
   profiler.stop();
@@ -409,7 +409,7 @@ size_t FrontierMLB<T, Levels>::getOutDegree(const GraphT& graph) {
     return 0;
   }
 
-  auto count_out_degree = [=] __device__(uint32_t active_idx) {
+  auto count_out_degree = [=] __device__(uint32_t active_idx) -> size_t {
     const uint32_t word_idx = bitmap.getOffsets()[active_idx];
     bitmap_type word = bitmap.getData()[word_idx];
     if (word == static_cast<bitmap_type>(0)) {
@@ -431,7 +431,7 @@ size_t FrontierMLB<T, Levels>::getOutDegree(const GraphT& graph) {
   };
 
   clutra::profile::KernelProfiler profiler("getOutDegree", "core");
-  size_t total_out_degree = thrust::transform_reduce(
+  auto total_out_degree = thrust::transform_reduce(
       thrust::device,
       thrust::make_counting_iterator<uint32_t>(0),
       thrust::make_counting_iterator<uint32_t>(active_frontier_size),
