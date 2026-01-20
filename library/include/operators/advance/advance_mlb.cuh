@@ -16,6 +16,7 @@
 #include <utils/profile.cuh>
 #include <utils/device.cuh>
 #include <concepts>
+#include <utils/queue.cuh>
 
 namespace cg = cooperative_groups;
 
@@ -73,24 +74,6 @@ __device__ __forceinline__ bool checkVertexActive(const FrontierDevT& in_dev_fro
   }
 }
 
-template<size_t Capacity>
-struct SharedQueue {
-  int tail;
-  uint32_t vertices[Capacity];
-  uint32_t degrees[Capacity];
-
-  __device__ void init() { tail = 0; }
-
-  __forceinline__ __device__ int push(uint32_t vertex, uint32_t degree) {
-  const int loc = atomicAdd(&tail, 1);
-    vertices[loc] = vertex;
-    degrees[loc] = degree;
-    return loc;
-  }
-
-  __device__ int size() const { return tail; }
-};
-
 template<advance_direction Direction, size_t BlockSize, graph::detail::DeviceGraphConcept GraphDevT, typename InFrontierDevT, typename OutFrontierDevT, typename StealerT, typename LambdaT>
 __global__ void advanceKernel(GraphDevT graph_dev,
                               InFrontierDevT in_dev_frontier,
@@ -101,9 +84,9 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   constexpr int WARP_SIZE = 32;
   static_assert(BlockSize % WARP_SIZE == 0, "BlockSize must be multiple of warp size");
 
-  __shared__ SharedQueue<BlockSize> cta_queue;
-  __shared__ SharedQueue<WARP_SIZE> warp_queues[BlockSize / WARP_SIZE];
-  __shared__ SharedQueue<WARP_SIZE> tiny_queues[BlockSize / WARP_SIZE];
+  __shared__ clutra::detail::utils::SharedQueue<BlockSize> cta_queue;
+  __shared__ clutra::detail::utils::SharedQueue<WARP_SIZE> warp_queues[BlockSize / WARP_SIZE];
+  __shared__ clutra::detail::utils::SharedQueue<WARP_SIZE> tiny_queues[BlockSize / WARP_SIZE];
   
   // fetch cooperative groups
   // cg::thread_block block = cg::this_thread_block();
