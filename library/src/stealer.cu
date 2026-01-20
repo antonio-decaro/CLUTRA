@@ -4,9 +4,3 @@
  */
 
 #include <stealer/stealer.cuh>
-
-using namespace clutra::stealer;
-
-__device__ void Stealer::steal() {
-
-}
