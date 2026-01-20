@@ -111,7 +111,6 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   
   // fetch frontier info
   const int warp_id = threadIdx.x / WARP_SIZE;
-  const int num_warps = BlockSize / WARP_SIZE;
   const int lane = threadIdx.x % WARP_SIZE;
   // const int rank = cluster.block_rank();
   uint32_t assigned_vertex = getAssignedVertex(in_dev_frontier, coarsening_factor, blockIdx.x, threadIdx.x);
@@ -128,7 +127,6 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   __syncthreads();
 
   // classify vertices by degree
-  const uint32_t warp_offset = warp_id * WARP_SIZE;
   const bool vertex_active = assigned_vertex < graph_dev.getVertexCount() && in_dev_frontier.check(assigned_vertex);
   if (vertex_active) {
     const uint32_t n_edges = graph_dev.getDegree(assigned_vertex);
