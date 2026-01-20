@@ -73,6 +73,24 @@ __device__ __forceinline__ bool checkVertexActive(const FrontierDevT& in_dev_fro
   }
 }
 
+template<size_t Capacity>
+struct SharedQueue {
+  int tail;
+  uint32_t vertices[Capacity];
+  uint32_t degrees[Capacity];
+
+  __device__ void init() { tail = 0; }
+
+  __device__ int push(uint32_t vertex, uint32_t degree) {
+    const int loc = atomicAdd(&tail, 1);
+    vertices[loc] = vertex;
+    degrees[loc] = degree;
+    return loc;
+  }
+
+  __device__ int size() const { return tail; }
+};
+
 template<advance_direction Direction, size_t BlockSize, graph::detail::DeviceGraphConcept GraphDevT, typename InFrontierDevT, typename OutFrontierDevT, typename StealerT, typename LambdaT>
 __global__ void advanceKernel(GraphDevT graph_dev,
                               InFrontierDevT in_dev_frontier,
@@ -83,33 +101,29 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   constexpr int WARP_SIZE = 32;
   static_assert(BlockSize % WARP_SIZE == 0, "BlockSize must be multiple of warp size");
 
-  __shared__ uint32_t n_edges_cta[BlockSize];
-  __shared__ uint32_t n_edges_warp[BlockSize];
-  __shared__ uint32_t warp_reduce[BlockSize];
-  __shared__ uint32_t warp_reduce_tail[BlockSize / WARP_SIZE];
-  __shared__ uint32_t cta_reduce[BlockSize];
-  __shared__ uint32_t cta_reduce_tail;
-  __shared__ uint32_t thread_reduce_vertices[BlockSize];
-  __shared__ uint32_t thread_reduce_degrees[BlockSize];
-  __shared__ uint32_t thread_reduce_tail[BlockSize / WARP_SIZE];
+  __shared__ SharedQueue<BlockSize> cta_queue;
+  __shared__ SharedQueue<WARP_SIZE> warp_queues[BlockSize / WARP_SIZE];
+  __shared__ SharedQueue<WARP_SIZE> tiny_queues[BlockSize / WARP_SIZE];
   
   // fetch cooperative groups
-  cg::thread_block block = cg::this_thread_block();
-  cg::cluster_group cluster = cg::this_cluster();
+  // cg::thread_block block = cg::this_thread_block();
+  // cg::cluster_group cluster = cg::this_cluster();
   
   // fetch frontier info
   const int warp_id = threadIdx.x / WARP_SIZE;
   const int num_warps = BlockSize / WARP_SIZE;
   const int lane = threadIdx.x % WARP_SIZE;
-  const int rank = cluster.block_rank();
+  // const int rank = cluster.block_rank();
   uint32_t assigned_vertex = getAssignedVertex(in_dev_frontier, coarsening_factor, blockIdx.x, threadIdx.x);
+  auto& warp_queue = warp_queues[warp_id];
+  auto& tiny_queue = tiny_queues[warp_id];
 
   // init computation
   if (lane == 0) {
-    warp_reduce_tail[warp_id] = 0;
-    thread_reduce_tail[warp_id] = 0;
+    warp_queue.init();
+    tiny_queue.init();
   }
-  if (threadIdx.x == 0) cta_reduce_tail = 0;
+  if (threadIdx.x == 0) cta_queue.init();
 
   __syncthreads();
 
@@ -120,38 +134,29 @@ __global__ void advanceKernel(GraphDevT graph_dev,
     const uint32_t n_edges = graph_dev.getDegree(assigned_vertex);
     const uint32_t cta_threshold = blockDim.x * blockDim.x;
     if (n_edges >= cta_threshold) {
-      const uint32_t loc = atomicAdd(&cta_reduce_tail, 1);
-      n_edges_cta[loc] = n_edges;
-      cta_reduce[loc] = assigned_vertex;
+      cta_queue.push(assigned_vertex, n_edges);
     } else if (n_edges >= WARP_SIZE) {
-      const uint32_t loc = atomicAdd(&warp_reduce_tail[warp_id], 1);
-      n_edges_warp[warp_offset + loc] = n_edges;
-      warp_reduce[warp_offset + loc] = assigned_vertex;
+      warp_queue.push(assigned_vertex, n_edges);
     } else {
-      const int loc = atomicAdd(&thread_reduce_tail[warp_id], 1);
-      const int write_idx = warp_offset + loc;
-      thread_reduce_vertices[write_idx] = assigned_vertex;
-      thread_reduce_degrees[write_idx] = n_edges;
+      tiny_queue.push(assigned_vertex, n_edges);
     }
   }
 
   __syncthreads();
 
   // process CTA large degree vertices
-  for (int i = 0; i < cta_reduce_tail; ++i) {
-    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, cta_reduce[i], n_edges_cta[i], threadIdx.x, blockDim.x);
+  for (int i = 0; i < cta_queue.size(); ++i) {
+    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, cta_queue.vertices[i], cta_queue.degrees[i], threadIdx.x, blockDim.x);
   }
   
   // process warp large degree vertices
-  for (int i = 0; i < warp_reduce_tail[warp_id]; ++i) {
-    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, warp_reduce[warp_offset + i], n_edges_warp[warp_offset + i], lane, WARP_SIZE);
+  for (int i = 0; i < warp_queue.size(); ++i) {
+    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, warp_queue.vertices[i], warp_queue.degrees[i], lane, WARP_SIZE);
   }
 
   // process small degree vertices
-  const uint32_t tiny_tail = thread_reduce_tail[warp_id];
-  for (int i = 0; i < tiny_tail; ++i) {
-    const int tiny_idx = warp_offset + i;
-    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, thread_reduce_vertices[tiny_idx], thread_reduce_degrees[tiny_idx], lane, WARP_SIZE);
+  for (int i = 0; i < tiny_queue.size(); ++i) {
+    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, tiny_queue.vertices[i], tiny_queue.degrees[i], lane, WARP_SIZE);
   }
 }
 
