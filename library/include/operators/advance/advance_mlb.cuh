@@ -81,8 +81,8 @@ struct SharedQueue {
 
   __device__ void init() { tail = 0; }
 
-  __device__ int push(uint32_t vertex, uint32_t degree) {
-    const int loc = atomicAdd(&tail, 1);
+  __forceinline__ __device__ int push(uint32_t vertex, uint32_t degree) {
+  const int loc = atomicAdd(&tail, 1);
     vertices[loc] = vertex;
     degrees[loc] = degree;
     return loc;
