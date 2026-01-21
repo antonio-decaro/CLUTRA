@@ -26,13 +26,13 @@ void push(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, 
 
 template<clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
 void push(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, clutra::frontier::FrontierMLB<>& output_frontier, LambdaT&& functor) {
-  detail::launchKernel<detail::advance_direction::push>(graph, input_frontier, &output_frontier, clutra::stealer::Stealer<>{}, std::forward<LambdaT>(functor));
+  detail::launchKernel<detail::advance_direction::push>(graph, input_frontier, &output_frontier, clutra::stealer::NullStealer{}, std::forward<LambdaT>(functor));
 }
 
 // Overload for advance when no output frontier is needed (e.g., counting-only or side-effect functors).
 template<clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
 void push(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, LambdaT&& functor) {
-  detail::launchKernel<detail::advance_direction::push>(graph, input_frontier, nullptr, clutra::stealer::Stealer<>{}, std::forward<LambdaT>(functor));
+  detail::launchKernel<detail::advance_direction::push>(graph, input_frontier, nullptr, clutra::stealer::NullStealer{}, std::forward<LambdaT>(functor));
 }
 
 template<clutra::graph::detail::GraphConcept GraphT, typename DeviceStealerType, typename LambdaT>
@@ -42,13 +42,13 @@ void pull(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, 
 
 template<clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
 void pull(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, clutra::frontier::FrontierMLB<>& output_frontier, LambdaT&& functor) {
-  detail::launchKernel<detail::advance_direction::pull>(graph, input_frontier, &output_frontier, clutra::stealer::Stealer<>{}, std::forward<LambdaT>(functor));
+  detail::launchKernel<detail::advance_direction::pull>(graph, input_frontier, &output_frontier, clutra::stealer::NullStealer{}, std::forward<LambdaT>(functor));
 }
 
 // Overload for advance when no output frontier is needed (e.g., counting-only or side-effect functors).
 template<clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
 void pull(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, LambdaT&& functor) {
-  detail::launchKernel<detail::advance_direction::pull>(graph, input_frontier, nullptr, clutra::stealer::Stealer<>{}, std::forward<LambdaT>(functor));
+  detail::launchKernel<detail::advance_direction::pull>(graph, input_frontier, nullptr, clutra::stealer::NullStealer{}, std::forward<LambdaT>(functor));
 }
 
 }// namespace clutra::operators::advance
