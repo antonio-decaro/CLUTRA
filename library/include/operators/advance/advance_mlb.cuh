@@ -84,28 +84,24 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   constexpr int WARP_SIZE = 32;
   static_assert(BlockSize % WARP_SIZE == 0, "BlockSize must be multiple of warp size");
 
-  __shared__ clutra::detail::utils::SharedQueue<BlockSize> cta_queue;
+  __shared__ clutra::detail::utils::SharedQueue<BlockSize> stealing_queue;
   __shared__ clutra::detail::utils::SharedQueue<WARP_SIZE> warp_queues[BlockSize / WARP_SIZE];
-  __shared__ clutra::detail::utils::SharedQueue<WARP_SIZE> tiny_queues[BlockSize / WARP_SIZE];
-  
-  // fetch cooperative groups
-  // cg::thread_block block = cg::this_thread_block();
-  // cg::cluster_group cluster = cg::this_cluster();
-  
+
   // fetch frontier info
   const int warp_id = threadIdx.x / WARP_SIZE;
   const int lane = threadIdx.x % WARP_SIZE;
-  // const int rank = cluster.block_rank();
-  uint32_t assigned_vertex = getAssignedVertex(in_dev_frontier, coarsening_factor, blockIdx.x, threadIdx.x);
   auto& warp_queue = warp_queues[warp_id];
-  auto& tiny_queue = tiny_queues[warp_id];
+
+  // fetch assigned vertex
+  uint32_t assigned_vertex = getAssignedVertex(in_dev_frontier, coarsening_factor, blockIdx.x, threadIdx.x);
 
   // init computation
+  if (threadIdx.x == 0)  {
+    stealing_queue.init();
+  }
   if (lane == 0) {
     warp_queue.init();
-    tiny_queue.init();
   }
-  if (threadIdx.x == 0) cta_queue.init();
 
   __syncthreads();
 
@@ -113,31 +109,25 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   const bool vertex_active = assigned_vertex < graph_dev.getVertexCount() && in_dev_frontier.check(assigned_vertex);
   if (vertex_active) {
     const uint32_t n_edges = graph_dev.getDegree(assigned_vertex);
-    const uint32_t cta_threshold = blockDim.x * blockDim.x;
+    const uint32_t cta_threshold = blockDim.x;// * blockDim.x;
+
     if (n_edges >= cta_threshold) {
-      cta_queue.push(assigned_vertex, n_edges);
-    } else if (n_edges >= WARP_SIZE) {
-      warp_queue.push(assigned_vertex, n_edges);
+      stealing_queue.push(assigned_vertex, n_edges);
     } else {
-      tiny_queue.push(assigned_vertex, n_edges);
+      warp_queue.push(assigned_vertex, n_edges);
     }
   }
 
   __syncthreads();
 
   // process CTA large degree vertices
-  for (int i = 0; i < cta_queue.size(); ++i) {
-    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, cta_queue.vertices[i], cta_queue.degrees[i], threadIdx.x, blockDim.x);
+  for (int i = 0; i < stealing_queue.size(); ++i) {
+    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, stealing_queue.vertices[i], stealing_queue.degrees[i], threadIdx.x, blockDim.x);
   }
   
   // process warp large degree vertices
   for (int i = 0; i < warp_queue.size(); ++i) {
     processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, warp_queue.vertices[i], warp_queue.degrees[i], lane, WARP_SIZE);
-  }
-
-  // process small degree vertices
-  for (int i = 0; i < tiny_queue.size(); ++i) {
-    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, tiny_queue.vertices[i], tiny_queue.degrees[i], lane, WARP_SIZE);
   }
 }
 
@@ -180,4 +170,4 @@ void launchKernel(const GraphT& graph,
   CUDA_CHECK(cudaDeviceSynchronize());
   profiler.stop();
 }
-}
+} // namespace clutra::operators::advance::detail
