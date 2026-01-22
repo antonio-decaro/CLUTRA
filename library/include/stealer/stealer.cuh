@@ -17,6 +17,7 @@ namespace clutra::stealer {
  */
 struct StealerConfig final {
   bool intra_cluster_stealing_enabled = false;
+  int preferred_cluster_size = 4;
 };
 
 static_assert(std::is_trivially_copyable_v<StealerConfig>,
@@ -39,6 +40,7 @@ public:
   __host__ void disableIntraClusterStealing() { _config.intra_cluster_stealing_enabled = false; }
   
   __forceinline__ __host__ __device__ bool isIntraClusterStealingEnabled() const { return _config.intra_cluster_stealing_enabled; }
+  __forceinline__ __host__ __device__ int getPreferredClusterSize() const { return _config.preferred_cluster_size; }
       
   __forceinline__ __device__ void steal() { static_cast<DerivedT*>(this)->steal_impl(); }
 
