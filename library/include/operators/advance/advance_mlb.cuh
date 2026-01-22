@@ -155,6 +155,8 @@ void launchKernel(const GraphT& graph,
 
   const size_t block_size = CU_SIZE;
   const size_t grid_size = ((active_size * bitmap_range) + block_size - 1) / block_size;
+  const size_t cluster_size = 4;
+  auto launch_config = clutra::detail::kernels::adjustLaunchConfig(grid_size, block_size, cluster_size, active_size, stealer);
 
   // launch advance kernel
   clutra::profile::KernelProfiler profiler("advanceKernel", "core");
@@ -162,9 +164,7 @@ void launchKernel(const GraphT& graph,
   if (output_frontier != nullptr) {
     auto out_dev_frontier = output_frontier->getDeviceFrontier();
     auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), decltype(out_dev_frontier), StealerT, LambdaT>;
-    clutra::detail::kernels::launchClusterKernel(grid_size, 
-                                                 block_size, 
-                                                 1, 
+    clutra::detail::kernels::launchClusterKernel(launch_config, 
                                                  kernel_launch_function,
                                                  graph_dev,
                                                  in_dev_frontier, 
@@ -175,9 +175,7 @@ void launchKernel(const GraphT& graph,
   } else {
     // Use a null frontier when the caller does not need to store output.
     auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), frontier::detail::NullFrontierDevice, StealerT, LambdaT>;
-    clutra::detail::kernels::launchClusterKernel(grid_size, 
-                                                 block_size, 
-                                                 1, 
+    clutra::detail::kernels::launchClusterKernel(launch_config, 
                                                  kernel_launch_function, 
                                                  graph_dev, 
                                                  in_dev_frontier, 
