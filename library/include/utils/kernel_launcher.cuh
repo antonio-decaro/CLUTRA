@@ -94,6 +94,7 @@ inline void launchClusterKernel(const LaunchConfig& config,
  * @param preferred_cluster_size Preferred cluster size (will be modified if needed).
  * @param workload_size Total workload size.
  * @param stealer Stealer object to check if intra-cluster stealing is enabled.
+ * @return LaunchConfig: Adjusted LaunchConfig with grid size, block size, and cluster size.
  */
 inline LaunchConfig adjustLaunchConfig(const size_t& preferred_grid_size,
                               const size_t& preferred_block_size,
