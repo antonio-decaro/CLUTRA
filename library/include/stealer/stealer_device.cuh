@@ -11,8 +11,8 @@
 namespace clutra::stealer {
 
 struct NullStealerDevice {
-  __device__ void init() const {}
-  __device__ void steal() const {}
+  __device__ void init() const;
+  __device__ void steal() const;
 };
 
 struct BasicStealerDevice {

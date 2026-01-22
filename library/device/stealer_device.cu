@@ -10,6 +10,11 @@ namespace cg = cooperative_groups;
 
 namespace clutra::stealer {
 
+__device__ void NullStealerDevice::init() const {}
+
+__device__ void NullStealerDevice::steal() const {}
+
+
 __device__ void BasicStealerDevice::init() const {
 #if __CUDA_ARCH__ >= 900
   if (config.intra_cluster_stealing_enabled) {
