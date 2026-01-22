@@ -26,10 +26,10 @@ target_include_directories(clutra PUBLIC
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/include>
   $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(clutra PUBLIC spdlog::spdlog_header_only)
+target_link_libraries(clutra PUBLIC fmt::fmt-header-only)
 target_compile_definitions(clutra PUBLIC
-  $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
-  $<$<NOT:$<CONFIG:Debug>>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF>
+  $<$<CONFIG:Debug>:CLUTRA_DEBUG_LOG=1>
+  $<$<NOT:$<CONFIG:Debug>>:CLUTRA_DEBUG_LOG=0>
 )
 
  # If the library was created as a compiled target, set properties and link CUDA runtime

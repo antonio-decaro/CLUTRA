@@ -1,17 +1,21 @@
 #pragma once
 
-#include <spdlog/spdlog.h>
+#include <fmt/core.h>
+#include <iostream>
+#include <string_view>
+#include <utility>
 
-// Debug logging macro, compiled out when SPDLOG_ACTIVE_LEVEL disables debug.
-#if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG
-#define CLUTRA_LOG_DEBUG(...) SPDLOG_DEBUG(__VA_ARGS__)
+namespace clutra::detail {
+
+template<typename... Args>
+inline void log(std::string_view message, Args&&... args) {
+#if defined(CLUTRA_DEBUG_LOG) && CLUTRA_DEBUG_LOG
+  std::cerr << "\x1b[35m"
+            << fmt::format(fmt::runtime(message), std::forward<Args>(args)...)
+            << "\x1b[0m" << std::endl;
 #else
-#define CLUTRA_LOG_DEBUG(...) ((void)0)
-#endif
-
-// Initialize runtime logging level in Debug builds (host code only).
-inline void clutraInitLogging() {
-#if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG
-  spdlog::set_level(spdlog::level::debug);
+  (void)message;
+  (void)sizeof...(args);
 #endif
 }
+} // namespace clutra::detail

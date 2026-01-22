@@ -19,7 +19,7 @@
 #include <utils/kernel_launcher.cuh>
 #include <stealer/stealer.cuh>
 #include <utils/queue.cuh>
-#include <spdlog/spdlog.h>
+#include <utils/logging.cuh>
 
 namespace cg = cooperative_groups;
 
@@ -160,12 +160,12 @@ void launchKernel(const GraphT& graph,
   const size_t cluster_size = stealer.getPreferredClusterSize();
   auto launch_config = clutra::detail::kernels::adjustLaunchConfig(grid_size, block_size, cluster_size, active_size, stealer);
 
-  spdlog::debug("Advance Operator Launch - Direction: {}, Grid Size: {} (was {}), Block Size: {}, Cluster Size: {}", 
-                (Direction == advance_direction::push) ? "Push" : "Pull",
-                launch_config.grid_size,
-                grid_size,
-                launch_config.block_size,
-                launch_config.cluster_size);
+  clutra::detail::log("Advance Operator Launch - Direction: {}, Grid Size: {} (was {}), Block Size: {}, Cluster Size: {}",
+                   (Direction == advance_direction::push) ? "Push" : "Pull",
+                   launch_config.grid_size,
+                   grid_size,
+                   launch_config.block_size,
+                   launch_config.cluster_size);
                 
   // launch advance kernel
   clutra::profile::KernelProfiler profiler("advanceKernel", "core");

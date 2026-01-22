@@ -21,12 +21,12 @@ project(CLUTRA
 # Fetch header-only dependencies.
 include(FetchContent)
 FetchContent_Declare(
-  spdlog
-  GIT_REPOSITORY https://github.com/gabime/spdlog.git
-  GIT_TAG v1.14.1
+  fmt
+  GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+  GIT_TAG 10.2.1
   GIT_SHALLOW TRUE
 )
-FetchContent_MakeAvailable(spdlog)
+FetchContent_MakeAvailable(fmt)
 
 # Find CUDA toolkit (provides Thrust headers and CUDA runtime target)
 find_package(CUDAToolkit REQUIRED)
