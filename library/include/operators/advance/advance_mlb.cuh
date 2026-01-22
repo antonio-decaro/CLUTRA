@@ -136,11 +136,11 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   }
 }
 
-template<advance_direction Direction, clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename DeviceStealerT, typename LambdaT>
+template<advance_direction Direction, clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename LambdaT>
 void launchKernel(const GraphT& graph,
                   clutra::frontier::FrontierMLB<>& input_frontier,
                   clutra::frontier::FrontierMLB<>* output_frontier,
-                  const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer,
+                  const DerivedStealerT& stealer,
                   LambdaT&& functor) {
   constexpr size_t CU_SIZE = 256;
   auto in_dev_frontier = input_frontier.getDeviceFrontier();
@@ -173,10 +173,11 @@ void launchKernel(const GraphT& graph,
   // launch advance kernel
   clutra::profile::KernelProfiler profiler("advanceKernel", "core");
 
+  using StealerDeviceT = typename DerivedStealerT::device_type;
   auto stealer_dev = stealer.device_view();
   if (output_frontier != nullptr) {
     auto out_dev_frontier = output_frontier->getDeviceFrontier();
-    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), decltype(out_dev_frontier), decltype(stealer_dev), LambdaT>;
+    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), decltype(out_dev_frontier), StealerDeviceT, LambdaT>;
     clutra::detail::kernels::launchClusterKernel(launch_config, 
                                                  kernel_launch_function,
                                                  graph_dev,
@@ -187,7 +188,7 @@ void launchKernel(const GraphT& graph,
                                                  std::forward<LambdaT>(functor));
   } else {
     // Use a null frontier when the caller does not need to store output.
-    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), frontier::detail::NullFrontierDevice, decltype(stealer_dev), LambdaT>;
+    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), frontier::detail::NullFrontierDevice, StealerDeviceT, LambdaT>;
     clutra::detail::kernels::launchClusterKernel(launch_config, 
                                                  kernel_launch_function, 
                                                  graph_dev, 

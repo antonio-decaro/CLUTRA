@@ -11,25 +11,15 @@
 namespace clutra::stealer {
 
 struct NullStealerDevice {
-  __forceinline__ __device__ void init() const {}
-  __forceinline__ __device__ void steal() const {} 
+  __device__ void init() const {}
+  __device__ void steal() const {}
 };
 
 struct BasicStealerDevice {
   StealerConfig config{};
 
-  __forceinline__ __device__ void init() const {
-#if __CUDA_ARCH__ >= 900
-    if (config.intra_cluster_stealing_enabled) {
-      auto cluster = cooperative_groups::this_cluster();
-      cluster.sync();
-    }
-#endif
-  }
-
-  __forceinline__ __device__ void steal() const {
-    // Device-side stealing logic can be implemented here.
-  }
+  __device__ void init() const;
+  __device__ void steal() const;
 };
 
 } // namespace clutra::stealer

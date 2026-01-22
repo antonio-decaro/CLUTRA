@@ -19,8 +19,8 @@
 
 namespace clutra::operators::advance {
 
-template<clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename DeviceStealerT, typename LambdaT>
-void push(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, clutra::frontier::FrontierMLB<>& output_frontier, const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer, LambdaT&& functor) {
+template<clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename LambdaT>
+void push(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, clutra::frontier::FrontierMLB<>& output_frontier, const DerivedStealerT& stealer, LambdaT&& functor) {
   detail::launchKernel<detail::advance_direction::push>(graph, input_frontier, &output_frontier, stealer, std::forward<LambdaT>(functor));
 }
 
@@ -35,8 +35,8 @@ void push(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, 
   detail::launchKernel<detail::advance_direction::push>(graph, input_frontier, nullptr, clutra::stealer::NullStealer{}, std::forward<LambdaT>(functor));
 }
 
-template<clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename DeviceStealerT, typename LambdaT>
-void pull(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, clutra::frontier::FrontierMLB<>& output_frontier, const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer, LambdaT&& functor) {
+template<clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename LambdaT>
+void pull(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, clutra::frontier::FrontierMLB<>& output_frontier, const DerivedStealerT& stealer, LambdaT&& functor) {
   detail::launchKernel<detail::advance_direction::pull>(graph, input_frontier, &output_frontier, stealer, std::forward<LambdaT>(functor));
 }
 

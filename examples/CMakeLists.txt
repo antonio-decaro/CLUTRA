@@ -1,7 +1,3 @@
-# src/CMakeLists.txt
-# Build the clutra_test executable and link against the 'clutra' interface target
-
-# Source file for the test binary
 include(FetchContent)
 
 # Gather every CUDA example source in the src folder
@@ -22,7 +18,6 @@ if(NOT cli11_POPULATED)
   add_subdirectory(${cli11_SOURCE_DIR} ${cli11_BINARY_DIR} EXCLUDE_FROM_ALL)
 endif()
 
-
 include_directories(${PROJECT_SOURCE_DIR}/examples/include)
 
 # Create a binary per CUDA source file so each example can be run independently
@@ -31,6 +26,9 @@ foreach(example_src ${EXAMPLE_SRCS})
   set(target_name clutra_${example_name})
 
   add_executable(${target_name} ${example_src})
+  if (TARGET clutra_device_objs)
+    target_sources(${target_name} PRIVATE $<TARGET_OBJECTS:clutra_device_objs>)
+  endif()
 
   # Ensure each target uses compatible language standards
   set_target_properties(${target_name} PROPERTIES
@@ -38,9 +36,9 @@ foreach(example_src ${EXAMPLE_SRCS})
     CXX_STANDARD_REQUIRED ON
     CUDA_STANDARD 20
     CUDA_STANDARD_REQUIRED ON
+    CUDA_SEPARABLE_COMPILATION ON
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON
   )
-
-  target_compile_features(${target_name} PRIVATE cxx_std_20)
 
   # Link against the library target and CUDA runtime
   target_link_libraries(${target_name} PRIVATE clutra CLI11::CLI11)
