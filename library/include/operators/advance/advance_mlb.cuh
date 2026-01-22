@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <concepts>
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cooperative_groups.h>
@@ -16,7 +17,7 @@
 #include <utils/profile.cuh>
 #include <utils/device.cuh>
 #include <utils/kernel_launcher.cuh>
-#include <concepts>
+#include <stealer/stealer.cuh>
 #include <utils/queue.cuh>
 
 namespace cg = cooperative_groups;
@@ -75,12 +76,12 @@ __device__ __forceinline__ bool checkVertexActive(const FrontierDevT& in_dev_fro
   }
 }
 
-template<advance_direction Direction, size_t BlockSize, graph::detail::DeviceGraphConcept GraphDevT, typename InFrontierDevT, typename OutFrontierDevT, typename StealerT, typename LambdaT>
+template<advance_direction Direction, size_t BlockSize, graph::detail::DeviceGraphConcept GraphDevT, typename InFrontierDevT, typename OutFrontierDevT, typename DerivedStealerT, typename LambdaT>
 __global__ void advanceKernel(GraphDevT graph_dev,
                               InFrontierDevT in_dev_frontier,
                               OutFrontierDevT out_dev_frontier,
                               int coarsening_factor,
-                              StealerT stealer,
+                              clutra::stealer::Stealer<DerivedStealerT> stealer,
                               LambdaT functor) {
   constexpr int WARP_SIZE = 32;
   static_assert(BlockSize % WARP_SIZE == 0, "BlockSize must be multiple of warp size");
@@ -132,11 +133,11 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   }
 }
 
-template<advance_direction Direction, clutra::graph::detail::GraphConcept GraphT, typename StealerT, typename LambdaT>
+template<advance_direction Direction, clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename LambdaT>
 void launchKernel(const GraphT& graph,
                   clutra::frontier::FrontierMLB<>& input_frontier,
                   clutra::frontier::FrontierMLB<>* output_frontier,
-                  StealerT stealer,
+                  const clutra::stealer::Stealer<DerivedStealerT>& stealer,
                   LambdaT&& functor) {
   constexpr size_t CU_SIZE = 256;
   auto in_dev_frontier = input_frontier.getDeviceFrontier();
@@ -146,7 +147,7 @@ void launchKernel(const GraphT& graph,
   input_frontier.computeActiveFrontier(invert);
 
   // compute launch informations
-  const size_t coarsening_factor = CU_SIZE  / 32 /* Warp Size */;
+  const size_t coarsening_factor = CU_SIZE / 32 /* Warp Size */;
   const size_t bitmap_range = in_dev_frontier.getBitmapRange();
   if (bitmap_range != 32) {
     throw std::runtime_error("Advance operator currently supports only frontiers with bitmap range equal to 32.");
@@ -158,16 +159,12 @@ void launchKernel(const GraphT& graph,
   const size_t cluster_size = stealer.getPreferredClusterSize();
   auto launch_config = clutra::detail::kernels::adjustLaunchConfig(grid_size, block_size, cluster_size, active_size, stealer);
 
-  std::cout << "Advance Kernel Launch Config - Grid Size: " << launch_config.grid_size << " (was " << grid_size << ")"
-            << ", Block Size: " << launch_config.block_size
-            << ", Cluster Size: " << launch_config.cluster_size << std::endl;
-
   // launch advance kernel
   clutra::profile::KernelProfiler profiler("advanceKernel", "core");
 
   if (output_frontier != nullptr) {
     auto out_dev_frontier = output_frontier->getDeviceFrontier();
-    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), decltype(out_dev_frontier), StealerT, LambdaT>;
+    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), decltype(out_dev_frontier), DerivedStealerT, LambdaT>;
     clutra::detail::kernels::launchClusterKernel(launch_config, 
                                                  kernel_launch_function,
                                                  graph_dev,
@@ -178,7 +175,7 @@ void launchKernel(const GraphT& graph,
                                                  std::forward<LambdaT>(functor));
   } else {
     // Use a null frontier when the caller does not need to store output.
-    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), frontier::detail::NullFrontierDevice, StealerT, LambdaT>;
+    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), frontier::detail::NullFrontierDevice, DerivedStealerT, LambdaT>;
     clutra::detail::kernels::launchClusterKernel(launch_config, 
                                                  kernel_launch_function, 
                                                  graph_dev, 
