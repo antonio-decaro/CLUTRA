@@ -160,7 +160,8 @@ void launchKernel(const GraphT& graph,
   const size_t cluster_size = stealer.getPreferredClusterSize();
   auto launch_config = clutra::detail::kernels::adjustLaunchConfig(grid_size, block_size, cluster_size, active_size, stealer);
 
-  clutra::detail::log("Advance Operator Launch - Direction: {}, Grid Size: {} (was {}), Block Size: {}, Cluster Size: {}",
+  clutra::detail::log("Advance Operator Launch - Active Size: {}, Direction: {}, Grid Size: {} (was {}), Block Size: {}, Cluster Size: {}",
+                   active_size,
                    (Direction == advance_direction::push) ? "Push" : "Pull",
                    launch_config.grid_size,
                    grid_size,
