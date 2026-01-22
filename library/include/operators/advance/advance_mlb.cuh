@@ -15,6 +15,7 @@
 #include <memory>
 #include <utils/profile.cuh>
 #include <utils/device.cuh>
+#include <utils/kernel_launcher.cuh>
 #include <concepts>
 #include <utils/queue.cuh>
 
@@ -156,15 +157,34 @@ void launchKernel(const GraphT& graph,
   const size_t grid_size = ((active_size * bitmap_range) + block_size - 1) / block_size;
 
   // launch advance kernel
-  clutra::profile::KernelProfiler profiler("advanceKernel");
+  clutra::profile::KernelProfiler profiler("advanceKernel", "core");
 
   if (output_frontier != nullptr) {
     auto out_dev_frontier = output_frontier->getDeviceFrontier();
-
-    detail::advanceKernel<Direction, CU_SIZE><<<grid_size, block_size>>>(graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, stealer, std::forward<LambdaT>(functor));
+    auto& kernel_launch_functor = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), decltype(out_dev_frontier), StealerT, LambdaT>;
+    clutra::detail::kernels::launchClusterKernel(grid_size, 
+                                                 block_size, 
+                                                 1, 
+                                                 kernel_launch_functor,
+                                                 graph_dev,
+                                                 in_dev_frontier, 
+                                                 out_dev_frontier, 
+                                                 coarsening_factor, 
+                                                 stealer, 
+                                                 std::forward<LambdaT>(functor));
   } else {
     // Use a null frontier when the caller does not need to store output.
-    detail::advanceKernel<Direction, CU_SIZE><<<grid_size, block_size>>>(graph_dev, in_dev_frontier, frontier::detail::NullFrontierDevice{}, coarsening_factor, stealer, std::forward<LambdaT>(functor));
+    auto& kernel_launch_functor = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), frontier::detail::NullFrontierDevice, StealerT, LambdaT>;
+    clutra::detail::kernels::launchClusterKernel(grid_size, 
+                                                 block_size, 
+                                                 1, 
+                                                 kernel_launch_functor, 
+                                                 graph_dev, 
+                                                 in_dev_frontier, 
+                                                 frontier::detail::NullFrontierDevice{}, 
+                                                 coarsening_factor, 
+                                                 stealer, 
+                                                 std::forward<LambdaT>(functor));
   }
 
   CUDA_CHECK(cudaDeviceSynchronize());
