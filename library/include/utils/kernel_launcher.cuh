@@ -108,7 +108,7 @@ inline LaunchConfig adjustLaunchConfig(const size_t& preferred_grid_size,
     grid_size = (workload_size + preferred_block_size - 1) / preferred_block_size;
   }
 
-  if (preferred_grid_size < cluster_size /*|| !stealer.isIntraClusterStealingEnabled()*/) {
+  if (preferred_grid_size < cluster_size || !stealer.isIntraClusterStealingEnabled()) {
     cluster_size = 1;
   }
 
