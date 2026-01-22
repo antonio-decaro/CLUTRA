@@ -161,11 +161,11 @@ void launchKernel(const GraphT& graph,
 
   if (output_frontier != nullptr) {
     auto out_dev_frontier = output_frontier->getDeviceFrontier();
-    auto& kernel_launch_functor = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), decltype(out_dev_frontier), StealerT, LambdaT>;
+    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), decltype(out_dev_frontier), StealerT, LambdaT>;
     clutra::detail::kernels::launchClusterKernel(grid_size, 
                                                  block_size, 
                                                  1, 
-                                                 kernel_launch_functor,
+                                                 kernel_launch_function,
                                                  graph_dev,
                                                  in_dev_frontier, 
                                                  out_dev_frontier, 
@@ -174,11 +174,11 @@ void launchKernel(const GraphT& graph,
                                                  std::forward<LambdaT>(functor));
   } else {
     // Use a null frontier when the caller does not need to store output.
-    auto& kernel_launch_functor = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), frontier::detail::NullFrontierDevice, StealerT, LambdaT>;
+    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), frontier::detail::NullFrontierDevice, StealerT, LambdaT>;
     clutra::detail::kernels::launchClusterKernel(grid_size, 
                                                  block_size, 
                                                  1, 
-                                                 kernel_launch_functor, 
+                                                 kernel_launch_function, 
                                                  graph_dev, 
                                                  in_dev_frontier, 
                                                  frontier::detail::NullFrontierDevice{}, 
