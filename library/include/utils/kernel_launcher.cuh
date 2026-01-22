@@ -118,11 +118,6 @@ inline LaunchConfig adjustLaunchConfig(const size_t& preferred_grid_size,
     grid_size += (cluster_size - remainder);
   }
 
-  std::cout << "Cluster size: " << cluster_size
-            << ", Grid Size: " << grid_size
-            << " (was " << preferred_grid_size << ")"
-            << ", Block Size: " << block_size << std::endl;
-
   return {
     .grid_size = grid_size, 
     .block_size = block_size, 
