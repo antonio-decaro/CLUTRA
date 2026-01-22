@@ -77,18 +77,20 @@ __device__ __forceinline__ bool checkVertexActive(const FrontierDevT& in_dev_fro
   }
 }
 
-template<advance_direction Direction, size_t BlockSize, graph::detail::DeviceGraphConcept GraphDevT, typename InFrontierDevT, typename OutFrontierDevT, typename DerivedStealerT, typename LambdaT>
+template<advance_direction Direction, size_t BlockSize, graph::detail::DeviceGraphConcept GraphDevT, typename InFrontierDevT, typename OutFrontierDevT, typename StealerDeviceT, typename LambdaT>
 __global__ void advanceKernel(GraphDevT graph_dev,
                               InFrontierDevT in_dev_frontier,
                               OutFrontierDevT out_dev_frontier,
                               int coarsening_factor,
-                              clutra::stealer::Stealer<DerivedStealerT> stealer,
+                              StealerDeviceT stealer,
                               LambdaT functor) {
   constexpr int WARP_SIZE = 32;
   static_assert(BlockSize % WARP_SIZE == 0, "BlockSize must be multiple of warp size");
 
   __shared__ clutra::detail::utils::SharedQueue<BlockSize> stealing_queue;
   __shared__ clutra::detail::utils::SharedQueue<WARP_SIZE> warp_queues[BlockSize / WARP_SIZE];
+
+  stealer.init();
 
   // fetch frontier info
   const int warp_id = threadIdx.x / WARP_SIZE;
@@ -134,11 +136,11 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   }
 }
 
-template<advance_direction Direction, clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename LambdaT>
+template<advance_direction Direction, clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename DeviceStealerT, typename LambdaT>
 void launchKernel(const GraphT& graph,
                   clutra::frontier::FrontierMLB<>& input_frontier,
                   clutra::frontier::FrontierMLB<>* output_frontier,
-                  const clutra::stealer::Stealer<DerivedStealerT>& stealer,
+                  const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer,
                   LambdaT&& functor) {
   constexpr size_t CU_SIZE = 256;
   auto in_dev_frontier = input_frontier.getDeviceFrontier();
@@ -171,27 +173,28 @@ void launchKernel(const GraphT& graph,
   // launch advance kernel
   clutra::profile::KernelProfiler profiler("advanceKernel", "core");
 
+  auto stealer_dev = stealer.device_view();
   if (output_frontier != nullptr) {
     auto out_dev_frontier = output_frontier->getDeviceFrontier();
-    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), decltype(out_dev_frontier), DerivedStealerT, LambdaT>;
+    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), decltype(out_dev_frontier), decltype(stealer_dev), LambdaT>;
     clutra::detail::kernels::launchClusterKernel(launch_config, 
                                                  kernel_launch_function,
                                                  graph_dev,
                                                  in_dev_frontier, 
                                                  out_dev_frontier, 
                                                  coarsening_factor, 
-                                                 stealer, 
+                                                 stealer_dev, 
                                                  std::forward<LambdaT>(functor));
   } else {
     // Use a null frontier when the caller does not need to store output.
-    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), frontier::detail::NullFrontierDevice, DerivedStealerT, LambdaT>;
+    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), frontier::detail::NullFrontierDevice, decltype(stealer_dev), LambdaT>;
     clutra::detail::kernels::launchClusterKernel(launch_config, 
                                                  kernel_launch_function, 
                                                  graph_dev, 
                                                  in_dev_frontier, 
                                                  frontier::detail::NullFrontierDevice{}, 
                                                  coarsening_factor, 
-                                                 stealer, 
+                                                 stealer_dev, 
                                                  std::forward<LambdaT>(functor));
   }
 

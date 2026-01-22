@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
   
   int iter = 0;
 
-  auto stealer = clutra::stealer::NullStealer{{.intra_cluster_stealing_enabled = true}};
+  clutra::stealer::BasicStealer stealer({.intra_cluster_stealing_enabled = true});
   
   std::cout << "[*] Running BFS from source vertex " << opts.source << std::endl;
   while (!in_frontier.empty()) {
