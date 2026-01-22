@@ -34,6 +34,9 @@ class Stealer {
 public:
   __host__ Stealer() : _config() {}
   __host__ Stealer(const StealerConfig& config) : _config(config) {}
+
+  __host__ void enableIntraClusterStealing() { _config.intra_cluster_stealing_enabled = true; }
+  __host__ void disableIntraClusterStealing() { _config.intra_cluster_stealing_enabled = false; }
   
   __forceinline__ __host__ __device__ bool isIntraClusterStealingEnabled() const { return _config.intra_cluster_stealing_enabled; }
       
@@ -50,6 +53,8 @@ protected:
  */
 class NullStealer : public Stealer<NullStealer> {
 public:
+  using Stealer<NullStealer>::Stealer;
+private:
   __forceinline__ __device__ void steal_impl() {}
 };
               
