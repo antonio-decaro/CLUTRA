@@ -23,3 +23,4 @@
 // Utils
 #include <utils/profile.cuh>
 #include <utils/device.cuh>
+#include <utils/logging.cuh>

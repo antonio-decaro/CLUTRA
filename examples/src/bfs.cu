@@ -41,6 +41,7 @@ bool validate(const GraphT& graph, const int* device_distances, const uint sourc
 }
 
 int main(int argc, char** argv) {
+  clutraInitLogging();
 
   GraphOptions opts;
   CLI::App app{"CLUTRA BFS"};
