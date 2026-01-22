@@ -68,11 +68,13 @@ int main(int argc, char** argv) {
   in_frontier.insert(opts.source);
   
   int iter = 0;
+
+  auto stealer = clutra::stealer::NullStealer{{.intra_cluster_stealing_enabled = true}};
   
   std::cout << "[*] Running BFS from source vertex " << opts.source << std::endl;
   while (!in_frontier.empty()) {
     // std::cout << "[*] BFS Iteration " << iter << ", Frontier Size: " << in_frontier.getOutDegree(graph) << std::endl;
-    clutra::operators::advance::push(graph, in_frontier, out_frontier,
+    clutra::operators::advance::push(graph, in_frontier, out_frontier, stealer,
       [iter, distances] __device__ (auto u, auto v, auto e, auto w) {
         if (distances[v] == -1) {
           distances[v] = iter + 1;

@@ -156,7 +156,6 @@ void launchKernel(const GraphT& graph,
   const size_t block_size = CU_SIZE;
   const size_t grid_size = ((active_size * bitmap_range) + block_size - 1) / block_size;
   const size_t cluster_size = stealer.getPreferredClusterSize();
-  stealer.enableIntraClusterStealing(); // TODO TO REMOVE
   auto launch_config = clutra::detail::kernels::adjustLaunchConfig(grid_size, block_size, cluster_size, active_size, stealer);
 
   std::cout << "Advance Kernel Launch Config - Grid Size: " << launch_config.grid_size << " (was " << grid_size << ")"
