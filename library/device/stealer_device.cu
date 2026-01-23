@@ -14,7 +14,7 @@ namespace clutra::stealer {
 __device__ bool StealerDevice::isStealingEnabled() const {
 #if __CUDA_ARCH__ >= 900
   cg::cluster_group cluster = cg::this_cluster();
-  return config.intra_cluster_stealing_enabled && (cluster.size() > 1);
+  return config.intra_cluster_stealing_enabled && (cluster.dim_blocks().x > 1);
 #else
   return false;
 #endif
