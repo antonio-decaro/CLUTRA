@@ -45,10 +45,10 @@ void printTraversedEdges(const int* traversed_edges, const size_t size, size_t b
   for (int i = 0; i < size; i++) {
     if (traversed_edges[i] > 0) {
       if (!first) {
-        std::cout << ", ";
+        std::cout << " ";
       }
       first = false;
-      std::cout << "[" << i << "] " << traversed_edges[i];
+      std::cout << traversed_edges[i];
     }
   }
   std::cout << std::endl;

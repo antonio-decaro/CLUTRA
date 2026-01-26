@@ -16,6 +16,7 @@ build/
 *.log
 *.tmp
 *.swp
+out/
 
 # Ignore IDE specific files
 .vscode/
