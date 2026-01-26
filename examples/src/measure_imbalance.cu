@@ -40,6 +40,20 @@ bool validate(const GraphT& graph, const int* device_distances, const uint sourc
   return mismatches == 0;
 }
 
+void printTraversedEdges(const int* traversed_edges, const size_t size, size_t block_size = 256) {
+  bool first = true;
+  for (int i = 0; i < size; i++) {
+    if (traversed_edges[i] > 0) {
+      if (!first) {
+        std::cout << ", ";
+      }
+      first = false;
+      std::cout << "[" << i << "] " << traversed_edges[i];
+    }
+  }
+  std::cout << std::endl;
+}
+
 int main(int argc, char** argv) {
 
   GraphOptions opts;
@@ -63,19 +77,25 @@ int main(int argc, char** argv) {
   int* distances;
   cudaMallocManaged(&distances, graph.getVertexCount() * sizeof(int));
   cudaMemset(distances, -1, graph.getVertexCount() * sizeof(int));
+  int* traversed_edges;
+  cudaMallocManaged(&traversed_edges, sizeof(int) * graph.getVertexCount());
   
   distances[opts.source] = 0;
   in_frontier.insert(opts.source);
   
   int iter = 0;
 
+
   clutra::stealer::BasicStealer stealer({.intra_cluster_stealing_enabled = opts.stealing});
   
   std::cout << "[*] Running BFS from source vertex " << opts.source << std::endl;
   while (!in_frontier.empty()) {
-    // std::cout << "[*] BFS Iteration " << iter << ", Frontier Size: " << in_frontier.getOutDegree(graph) << std::endl;
+    cudaMemset(traversed_edges, 0, sizeof(int) * graph.getVertexCount());
+    cudaDeviceSynchronize();
+    
     clutra::operators::advance::push(graph, in_frontier, out_frontier, stealer,
-      [iter, distances] __device__ (auto u, auto v, auto e, auto w) {
+      [iter, distances, traversed_edges] __device__ (auto u, auto v, auto e, auto w) {
+        atomicAdd(&traversed_edges[blockIdx.x], 1);
         if (distances[v] == -1) {
           distances[v] = iter + 1;
           return true;
@@ -83,6 +103,10 @@ int main(int argc, char** argv) {
         return false;
       }
     );
+    
+    std::cout << "Iteration " << iter << ": ";
+    printTraversedEdges(traversed_edges, graph.getVertexCount());
+
 
     clutra::frontier::FrontierMLB<uint32_t>::swap(in_frontier, out_frontier);
     out_frontier.clear();
@@ -105,6 +129,7 @@ int main(int argc, char** argv) {
   }
   
   cudaFree(distances);
+  cudaFree(traversed_edges);
 
   clutra::profile::KernelProfilerManager::instance().printSummary();
 }

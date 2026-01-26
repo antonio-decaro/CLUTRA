@@ -23,6 +23,7 @@ struct GraphOptions {
   bool binary_format = false;
   bool matrix_market = false;
   bool undirected = false;
+  bool stealing = false;
   bool random_source = true;
   std::string path;
   size_t source = 0;
@@ -39,6 +40,7 @@ inline CLI::Option* configureBaseCLI(CLI::App& app, GraphOptions& opts) {
   app.add_flag("-p,--print", opts.print_output, "Print algorithm output to stdout");
   app.add_flag("-v,--validate", opts.validate, "Validate algorithm output against CPU implementation");
   app.add_flag("-u,--undirected", opts.undirected, "Treat input COO as an undirected graph");
+  app.add_flag("-t,--stealing", opts.stealing, "Enable work stealing in the advance operator");
 
   auto source_opt = app.add_option("-s,--source", opts.source, "Specify the source vertex");
   source_opt->check(CLI::NonNegativeNumber);
