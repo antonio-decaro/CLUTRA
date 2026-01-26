@@ -35,4 +35,4 @@ if [ -z "$target_script" ]; then
   exit 1
 fi
 
-bash "$target_script" "$@"
+bash "$target_script" $SCRIPT_DIR "$@"

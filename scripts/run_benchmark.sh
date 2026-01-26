@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# the first argument is always the working directory of the calling script
+SCRIPT_DIR="$1"
+shift
 
 dataset_folder=""
 dataset_list=""
 enable_stealing=""
+out_dir="$SCRIPT_DIR/out/benchmarks"
 num_runs=20
 benchmarks=("measure_imbalance")
 declare -A dataset_sources
@@ -18,7 +21,7 @@ function print_usage {
   echo "  -h    Show this help message"
 }
 
-while getopts :hsd:f:n: flag
+while getopts :hsd:f:n:o: flag
 do
   case "${flag}" in
     f) dataset_folder=${OPTARG};;
@@ -27,6 +30,7 @@ do
     d) dataset_list=${OPTARG};;
     s) enable_stealing="-t";;
     n) num_runs=${OPTARG};;
+    o) out_dir=${OPTARG};;
     \?) echo "Invalid option: -${OPTARG}" >&2
         print_usage
         exit 1;;
@@ -87,6 +91,11 @@ do
 
   for benchmark in "${benchmarks[@]}"
   do
+    tmp_out_dir="$out_dir/$benchmark"
+    mkdir -p "$tmp_out_dir"
+
+    rm -f "$tmp_out_dir/${dataset_basename}.out"
+
     echo "Running $benchmark on dataset $dataset_path"
     sources_csv="${dataset_sources[$dataset]}"
     if [ -n "$sources_csv" ]; then
@@ -97,13 +106,13 @@ do
           continue
         fi
         echo "  Source: $source"
-        $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $enable_stealing -s "$source"
+        $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $enable_stealing -s "$source" >> "$tmp_out_dir/${dataset_basename}.out"
       done
     else
       for ((run=1; run<=num_runs; run++))
       do
         echo "  Run $run/$num_runs"
-        $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $enable_stealing
+        $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $enable_stealing >> "$tmp_out_dir/${dataset_basename}.out"
       done
     fi
   done
