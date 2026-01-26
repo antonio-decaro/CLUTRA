@@ -82,113 +82,86 @@ __global__ void advanceKernel(GraphDevT graph_dev,
                               InFrontierDevT in_dev_frontier,
                               OutFrontierDevT out_dev_frontier,
                               int coarsening_factor,
+                              size_t work_tiles,
                               StealerDeviceT stealer,
                               LambdaT functor) {
   constexpr int WARP_SIZE = 32;
   static_assert(BlockSize % WARP_SIZE == 0, "BlockSize must be multiple of warp size");
 
-  __shared__ clutra::detail::utils::SharedQueue<BlockSize> stealing_queue;
+  __shared__ clutra::detail::utils::SharedQueue<BlockSize> cta_queue;
   __shared__ clutra::detail::utils::SharedQueue<WARP_SIZE> warp_queues[BlockSize / WARP_SIZE];
+  __shared__ typename StealerDeviceT::template SharedState<BlockSize> stealer_state;
 
-  cg::this_cluster().sync();
-
-  // fetch frontier info
   const int warp_id = threadIdx.x / WARP_SIZE;
   const int lane = threadIdx.x % WARP_SIZE;
   auto& warp_queue = warp_queues[warp_id];
 
-  // fetch assigned vertex
-  uint32_t assigned_vertex = getAssignedVertex(in_dev_frontier, coarsening_factor, blockIdx.x, threadIdx.x);
+  stealer.template init<BlockSize>(&cta_queue, &stealer_state);
 
-  // init computation
-  if (threadIdx.x == 0)  {
-    stealing_queue.init();
-  }
-  if (lane == 0) {
-    warp_queue.init();
-  }
+  const size_t total_iters = (work_tiles + gridDim.x - 1) / gridDim.x;
+  for (size_t iter = 0; iter < total_iters; ++iter) { // TODO change with stealing with ptx 
+    const uint32_t tile_gid = static_cast<uint32_t>(blockIdx.x + (iter * gridDim.x));
 
-  __syncthreads();
+    if (threadIdx.x == 0)  {
+      cta_queue.init();
+    }
+    if (lane == 0) {
+      warp_queue.init();
+    }
 
-  // classify vertices by degree
-  const bool vertex_active = assigned_vertex < graph_dev.getVertexCount() && in_dev_frontier.check(assigned_vertex);
-  if (vertex_active) {
-    const uint32_t n_edges = graph_dev.getDegree(assigned_vertex);
-    const uint32_t cta_threshold = blockDim.x;// * blockDim.x;
+    __syncthreads();
+
+    const uint32_t assigned_vertex = getAssignedVertex(in_dev_frontier, coarsening_factor, tile_gid, threadIdx.x);
+    const bool vertex_active = assigned_vertex < graph_dev.getVertexCount() && in_dev_frontier.check(assigned_vertex);
+    if (vertex_active) {
+      const uint32_t n_edges = graph_dev.getDegree(assigned_vertex);
+      const uint32_t cta_threshold = blockDim.x;
 
     if (n_edges >= cta_threshold) {
-      stealing_queue.push(assigned_vertex, n_edges);
-    } else {
-      warp_queue.push(assigned_vertex, n_edges);
-    }
-  }
-
-  __syncthreads();
-
-  // process CTA large degree vertices
-  // for (int i = 0; i < stealing_queue.size(); ++i) {
-  //   processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, stealing_queue.vertices[i], stealing_queue.degrees[i], threadIdx.x, blockDim.x);
-  // }
-  uint32_t vertex, degree;
-  while (stealing_queue.pop(vertex, degree)) {
-    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, vertex, degree, threadIdx.x, blockDim.x);
-    __syncthreads();
-  }
-  
-  // process warp large degree vertices
-  for (int i = 0; i < warp_queue.size(); ++i) {
-    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, warp_queue.vertices[i], warp_queue.degrees[i], lane, WARP_SIZE);
-  }
-
-  if (!stealer.isStealingEnabled()) { return; }
-
-  cg::cluster_group cluster = cg::this_cluster();
-  __shared__ int victim_rank;
-  __shared__ int pos;
-  __shared__ clutra::detail::utils::SharedQueue<BlockSize>* stealing_queue_ptr[4];
-
-  if (threadIdx.x == 0) {
-    victim_rank = -1;
-    stealing_queue_ptr[cluster.block_rank()] = &stealing_queue;
-    for (int i = 0; i < cluster.dim_blocks().x; ++i) {
-      if (i != cluster.block_rank()) {
-        stealing_queue_ptr[i] = cluster.map_shared_rank(&stealing_queue, i);
+        cta_queue.push(assigned_vertex, n_edges);
+      } else {
+        warp_queue.push(assigned_vertex, n_edges);
       }
     }
-  }
-  __threadfence_cluster();
 
-  while (true) {
-    // __syncthreads();
-    if (threadIdx.x == 0) {
-      victim_rank = -1;
-      for (int victim_offset = 1; victim_offset < cluster.dim_blocks().x; ++victim_offset) {
-        int potential_victim_rank = (cluster.block_rank() + victim_offset) % cluster.dim_blocks().x;
-        auto* victim_queue = stealing_queue_ptr[potential_victim_rank];
-        if (victim_queue->head < victim_queue->tail - 32) {
-          pos = atomicSub(&(victim_queue->tail), 16);
-          victim_rank = potential_victim_rank;
-          // printf("Block %d steals from Block %d\n", cluster.block_rank(), victim_rank);
-          break;
-        }
+    __syncthreads();
+
+    uint32_t vertex, degree;
+    while (cta_queue.pop(vertex, degree)) {
+      processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, vertex, degree, threadIdx.x, blockDim.x);
+      __syncthreads();
+    }
+    
+    for (int i = 0; i < warp_queue.size(); ++i) {
+      processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, warp_queue.vertices[i], warp_queue.degrees[i], lane, WARP_SIZE);
+    }
+
+    if (!stealer.isStealingEnabled()) {
+      continue;
+    }
+
+    while (true) {
+      const int steal_count = stealer.template attemptStealing<BlockSize>(&stealer_state, 16);
+      if (steal_count == 0) {
+        break;
       }
+      uint32_t steal_vertex = 0;
+      uint32_t steal_degree = 0;
+      for (int i = 0; i < steal_count; ++i) {
+        stealer.template steal<BlockSize>(&stealer_state, i, &steal_vertex, &steal_degree);
+        processVertexRange<Direction>(graph_dev,
+                                      out_dev_frontier,
+                                      functor,
+                                      steal_vertex,
+                                      steal_degree,
+                                      threadIdx.x,
+                                      blockDim.x);
+      }
+      __syncthreads();
     }
-    __syncthreads();
-    if (victim_rank == -1) {
-      break; // no more victims
-    }
-
-    auto* victim_queue = stealing_queue_ptr[victim_rank];
-    uint32_t stolen_vertex = victim_queue->vertices[pos - 1];
-    uint32_t stolen_degree = victim_queue->degrees[pos - 1];
-    for (int i = 1; i <= 16; i++) {
-      processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, victim_queue->vertices[pos - i], victim_queue->degrees[pos - i], threadIdx.x, blockDim.x);
-    }
-    // processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, stolen_vertex, stolen_degree, threadIdx.x, blockDim.x);
-    __syncthreads();
   }
 
-  cluster.sync();
+  stealer.template finalize<BlockSize>();
 }
 
 template<advance_direction Direction, clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename DeviceStealerT, typename LambdaT>
@@ -213,15 +186,18 @@ void launchKernel(const GraphT& graph,
   const size_t active_size = input_frontier.getActiveFrontierSize();
 
   const size_t block_size = CU_SIZE;
-  const size_t grid_size = ((active_size * bitmap_range) + block_size - 1) / block_size;
+  const size_t work_tiles = ((active_size * bitmap_range) + block_size - 1) / block_size;
+  int device_id = 0;
+  CUDA_CHECK(cudaGetDevice(&device_id));
+  const size_t fixed_grid_size = clutra::detail::device::getMaxNumBlocks(block_size, device_id);
   const size_t cluster_size = stealer.getPreferredClusterSize();
-  auto launch_config = clutra::detail::kernels::adjustLaunchConfig(grid_size, block_size, cluster_size, active_size, stealer);
+  auto launch_config = clutra::detail::kernels::adjustLaunchConfig(fixed_grid_size, block_size, cluster_size, work_tiles, stealer);
 
   clutra::detail::log("Advance Operator Launch - Active Size: {}, Direction: {}, Grid Size: {} (was {}), Block Size: {}, Cluster Size: {}, Stealing Enabled: {}",
                    active_size,
                    (Direction == advance_direction::push) ? "Push" : "Pull",
                    launch_config.grid_size,
-                   grid_size,
+                   work_tiles,
                    launch_config.block_size,
                    launch_config.cluster_size,
                    stealer.isIntraClusterStealingEnabled() ? "Yes" : "No");
@@ -238,7 +214,8 @@ void launchKernel(const GraphT& graph,
                                                  graph_dev,
                                                  in_dev_frontier, 
                                                  out_dev_frontier, 
-                                                 coarsening_factor, 
+                                                 coarsening_factor,
+                                                 work_tiles,
                                                  stealer_dev, 
                                                  std::forward<LambdaT>(functor));
   } else {
@@ -249,7 +226,8 @@ void launchKernel(const GraphT& graph,
                                                  graph_dev, 
                                                  in_dev_frontier, 
                                                  frontier::detail::NullFrontierDevice{}, 
-                                                 coarsening_factor, 
+                                                 coarsening_factor,
+                                                 work_tiles,
                                                  stealer_dev, 
                                                  std::forward<LambdaT>(functor));
   }
