@@ -90,7 +90,7 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   __shared__ clutra::detail::utils::SharedQueue<BlockSize> stealing_queue;
   __shared__ clutra::detail::utils::SharedQueue<WARP_SIZE> warp_queues[BlockSize / WARP_SIZE];
 
-  stealer.init();
+  cg::this_cluster().sync();
 
   // fetch frontier info
   const int warp_id = threadIdx.x / WARP_SIZE;
@@ -126,21 +126,76 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   __syncthreads();
 
   // process CTA large degree vertices
-  for (int i = 0; i < stealing_queue.size(); ++i) {
-    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, stealing_queue.vertices[i], stealing_queue.degrees[i], threadIdx.x, blockDim.x);
+  // for (int i = 0; i < stealing_queue.size(); ++i) {
+  //   processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, stealing_queue.vertices[i], stealing_queue.degrees[i], threadIdx.x, blockDim.x);
+  // }
+  uint32_t vertex, degree;
+  while (stealing_queue.pop(vertex, degree)) {
+    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, vertex, degree, threadIdx.x, blockDim.x);
+    __syncthreads();
   }
   
   // process warp large degree vertices
   for (int i = 0; i < warp_queue.size(); ++i) {
     processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, warp_queue.vertices[i], warp_queue.degrees[i], lane, WARP_SIZE);
   }
+
+  if (!stealer.isStealingEnabled()) { return; }
+
+  cg::cluster_group cluster = cg::this_cluster();
+  __shared__ int victim_rank;
+  __shared__ int pos;
+  __shared__ clutra::detail::utils::SharedQueue<BlockSize>* stealing_queue_ptr[4];
+
+  if (threadIdx.x == 0) {
+    victim_rank = -1;
+    stealing_queue_ptr[cluster.block_rank()] = &stealing_queue;
+    for (int i = 0; i < cluster.dim_blocks().x; ++i) {
+      if (i != cluster.block_rank()) {
+        stealing_queue_ptr[i] = cluster.map_shared_rank(&stealing_queue, i);
+      }
+    }
+  }
+  __threadfence_cluster();
+
+  while (true) {
+    // __syncthreads();
+    if (threadIdx.x == 0) {
+      victim_rank = -1;
+      for (int victim_offset = 1; victim_offset < cluster.dim_blocks().x; ++victim_offset) {
+        int potential_victim_rank = (cluster.block_rank() + victim_offset) % cluster.dim_blocks().x;
+        auto* victim_queue = stealing_queue_ptr[potential_victim_rank];
+        if (victim_queue->head < victim_queue->tail - 32) {
+          pos = atomicSub(&(victim_queue->tail), 16);
+          victim_rank = potential_victim_rank;
+          // printf("Block %d steals from Block %d\n", cluster.block_rank(), victim_rank);
+          break;
+        }
+      }
+    }
+    __syncthreads();
+    if (victim_rank == -1) {
+      break; // no more victims
+    }
+
+    auto* victim_queue = stealing_queue_ptr[victim_rank];
+    uint32_t stolen_vertex = victim_queue->vertices[pos - 1];
+    uint32_t stolen_degree = victim_queue->degrees[pos - 1];
+    for (int i = 1; i <= 16; i++) {
+      processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, victim_queue->vertices[pos - i], victim_queue->degrees[pos - i], threadIdx.x, blockDim.x);
+    }
+    // processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, stolen_vertex, stolen_degree, threadIdx.x, blockDim.x);
+    __syncthreads();
+  }
+
+  cluster.sync();
 }
 
-template<advance_direction Direction, clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename LambdaT>
+template<advance_direction Direction, clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename DeviceStealerT, typename LambdaT>
 void launchKernel(const GraphT& graph,
                   clutra::frontier::FrontierMLB<>& input_frontier,
                   clutra::frontier::FrontierMLB<>* output_frontier,
-                  const DerivedStealerT& stealer,
+                  const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer,
                   LambdaT&& functor) {
   constexpr size_t CU_SIZE = 256;
   auto in_dev_frontier = input_frontier.getDeviceFrontier();
@@ -162,22 +217,22 @@ void launchKernel(const GraphT& graph,
   const size_t cluster_size = stealer.getPreferredClusterSize();
   auto launch_config = clutra::detail::kernels::adjustLaunchConfig(grid_size, block_size, cluster_size, active_size, stealer);
 
-  clutra::detail::log("Advance Operator Launch - Active Size: {}, Direction: {}, Grid Size: {} (was {}), Block Size: {}, Cluster Size: {}",
+  clutra::detail::log("Advance Operator Launch - Active Size: {}, Direction: {}, Grid Size: {} (was {}), Block Size: {}, Cluster Size: {}, Stealing Enabled: {}",
                    active_size,
                    (Direction == advance_direction::push) ? "Push" : "Pull",
                    launch_config.grid_size,
                    grid_size,
                    launch_config.block_size,
-                   launch_config.cluster_size);
+                   launch_config.cluster_size,
+                   stealer.isIntraClusterStealingEnabled() ? "Yes" : "No");
                 
   // launch advance kernel
   clutra::profile::KernelProfiler profiler("advanceKernel", "core");
 
-  using StealerDeviceT = typename DerivedStealerT::device_type;
-  auto stealer_dev = stealer.device_view();
+  auto stealer_dev = stealer.getDeviceStealer();
   if (output_frontier != nullptr) {
     auto out_dev_frontier = output_frontier->getDeviceFrontier();
-    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), decltype(out_dev_frontier), StealerDeviceT, LambdaT>;
+    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), decltype(out_dev_frontier), decltype(stealer_dev), LambdaT>;
     clutra::detail::kernels::launchClusterKernel(launch_config, 
                                                  kernel_launch_function,
                                                  graph_dev,
@@ -188,7 +243,7 @@ void launchKernel(const GraphT& graph,
                                                  std::forward<LambdaT>(functor));
   } else {
     // Use a null frontier when the caller does not need to store output.
-    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), frontier::detail::NullFrontierDevice, StealerDeviceT, LambdaT>;
+    auto& kernel_launch_function = detail::advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), frontier::detail::NullFrontierDevice, decltype(stealer_dev), LambdaT>;
     clutra::detail::kernels::launchClusterKernel(launch_config, 
                                                  kernel_launch_function, 
                                                  graph_dev, 
