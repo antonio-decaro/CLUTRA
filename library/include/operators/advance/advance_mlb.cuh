@@ -26,13 +26,13 @@ namespace cg = cooperative_groups;
 namespace clutra::operators::advance::detail {
 
 template<advance_direction Direction, graph::detail::DeviceGraphConcept GraphDevT, typename FrontierDevT, typename LambdaT>
-__device__ inline void processVertexRange(GraphDevT graph_dev,
-                                          FrontierDevT out_dev_frontier,
-                                          LambdaT functor,
-                                          uint32_t vertex,
-                                          uint32_t degree,
-                                          uint32_t lane,
-                                          uint32_t stride) {
+__device__ __forceinline__ void processVertexRange(GraphDevT graph_dev,
+                                                   FrontierDevT out_dev_frontier,
+                                                   LambdaT functor,
+                                                   uint32_t vertex,
+                                                   uint32_t degree,
+                                                   uint32_t lane,
+                                                   uint32_t stride) {
   auto start = graph_dev.begin(vertex);
   for (uint32_t edge_offset = lane; edge_offset < degree; edge_offset += stride) {
     auto n = start + edge_offset;
@@ -82,7 +82,6 @@ __global__ void advanceKernel(GraphDevT graph_dev,
                               InFrontierDevT in_dev_frontier,
                               OutFrontierDevT out_dev_frontier,
                               int coarsening_factor,
-                              size_t work_tiles,
                               StealerDeviceT stealer,
                               LambdaT functor) {
   constexpr int WARP_SIZE = 32;
@@ -92,17 +91,22 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   __shared__ clutra::detail::utils::SharedQueue<WARP_SIZE> warp_queues[BlockSize / WARP_SIZE];
   __shared__ typename StealerDeviceT::template SharedState<BlockSize> stealer_state;
 
-  const int warp_id = threadIdx.x / WARP_SIZE;
-  const int lane = threadIdx.x % WARP_SIZE;
+  const int tid = threadIdx.x;
+  const int warp_id = tid >> 5;
+  const int lane = tid & (WARP_SIZE - 1);
+  const int block_dim = blockDim.x;
   auto& warp_queue = warp_queues[warp_id];
 
   stealer.template init<BlockSize>(&cta_queue, &stealer_state);
 
+  const uint32_t active_size = in_dev_frontier.getOffsetsSize()[0];
+  const uint32_t bitmap_range = in_dev_frontier.getBitmapRange();
+  const size_t work_tiles = ((static_cast<size_t>(active_size) * bitmap_range) + block_dim - 1) / block_dim;
   const size_t total_iters = (work_tiles + gridDim.x - 1) / gridDim.x;
   for (size_t iter = 0; iter < total_iters; ++iter) { // TODO change with stealing with ptx 
     const uint32_t tile_gid = static_cast<uint32_t>(blockIdx.x + (iter * gridDim.x));
 
-    if (threadIdx.x == 0)  {
+    if (tid == 0)  {
       cta_queue.init();
     }
     if (lane == 0) {
@@ -111,11 +115,11 @@ __global__ void advanceKernel(GraphDevT graph_dev,
 
     __syncthreads();
 
-    const uint32_t assigned_vertex = getAssignedVertex(in_dev_frontier, coarsening_factor, tile_gid, threadIdx.x);
+    const uint32_t assigned_vertex = getAssignedVertex(in_dev_frontier, coarsening_factor, tile_gid, tid);
     const bool vertex_active = assigned_vertex < graph_dev.getVertexCount() && in_dev_frontier.check(assigned_vertex);
     if (vertex_active) {
       const uint32_t n_edges = graph_dev.getDegree(assigned_vertex);
-      const uint32_t cta_threshold = blockDim.x;
+      const uint32_t cta_threshold = block_dim;
 
     if (n_edges >= cta_threshold) {
         cta_queue.push(assigned_vertex, n_edges);
@@ -128,7 +132,7 @@ __global__ void advanceKernel(GraphDevT graph_dev,
 
     uint32_t vertex, degree;
     while (cta_queue.pop(vertex, degree)) {
-      processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, vertex, degree, threadIdx.x, blockDim.x);
+      processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, vertex, degree, tid, block_dim);
       __syncthreads();
     }
     
@@ -140,8 +144,9 @@ __global__ void advanceKernel(GraphDevT graph_dev,
       continue;
     }
 
+    constexpr int STEAL_CHUNK = 16;
     while (true) {
-      const int steal_count = stealer.template attemptStealing<BlockSize>(&stealer_state, 16);
+      const int steal_count = stealer.template attemptStealing<BlockSize>(&stealer_state, STEAL_CHUNK);
       if (steal_count == 0) {
         break;
       }
@@ -154,8 +159,8 @@ __global__ void advanceKernel(GraphDevT graph_dev,
                                       functor,
                                       steal_vertex,
                                       steal_degree,
-                                      threadIdx.x,
-                                      blockDim.x);
+                                      tid,
+                                      block_dim);
       }
       __syncthreads();
     }
@@ -190,6 +195,7 @@ void launchKernel(const GraphT& graph,
   int device_id = 0;
   CUDA_CHECK(cudaGetDevice(&device_id));
   const size_t fixed_grid_size = clutra::detail::device::getMaxNumBlocks(block_size, device_id);
+  // const size_t grid_size = (active_size * bitmap_range + (block_size - 1)) / block_size;
   const size_t cluster_size = stealer.getPreferredClusterSize();
   auto launch_config = clutra::detail::kernels::adjustLaunchConfig(fixed_grid_size, block_size, cluster_size, work_tiles, stealer);
 
@@ -215,7 +221,6 @@ void launchKernel(const GraphT& graph,
                                                  in_dev_frontier, 
                                                  out_dev_frontier, 
                                                  coarsening_factor,
-                                                 work_tiles,
                                                  stealer_dev, 
                                                  std::forward<LambdaT>(functor));
   } else {
@@ -227,7 +232,6 @@ void launchKernel(const GraphT& graph,
                                                  in_dev_frontier, 
                                                  frontier::detail::NullFrontierDevice{}, 
                                                  coarsening_factor,
-                                                 work_tiles,
                                                  stealer_dev, 
                                                  std::forward<LambdaT>(functor));
   }
