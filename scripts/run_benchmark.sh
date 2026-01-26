@@ -7,13 +7,14 @@ shift
 dataset_folder=""
 dataset_list=""
 enable_stealing=""
-out_dir="$SCRIPT_DIR/out/benchmarks"
+out_dir=""
 num_runs=20
-benchmarks=("measure_imbalance")
+benchmark="measure_imbalance"
 declare -A dataset_sources
 
 function print_usage {
   echo "Usage: $0 -f <dataset_folder>"
+  echo "  -b    Specify the benchmark to run (default: measure_imbalance)"
   echo "  -f    Specify the dataset folder"
   echo "  -d    Specify datasets with a semicolon-separated list. Use dataset:src1,src2,... to optionally provide sources per dataset. If no sources are provided, each dataset runs $num_runs times on random sources."
   echo "  -s    Enable work stealing (optional)"
@@ -21,13 +22,14 @@ function print_usage {
   echo "  -h    Show this help message"
 }
 
-while getopts :hsd:f:n:o: flag
+while getopts :hsd:f:n:o:b: flag
 do
   case "${flag}" in
     f) dataset_folder=${OPTARG};;
     h) print_usage
        exit 0;;
     d) dataset_list=${OPTARG};;
+    b) benchmark=${OPTARG};;
     s) enable_stealing="-t";;
     n) num_runs=${OPTARG};;
     o) out_dir=${OPTARG};;
@@ -36,6 +38,11 @@ do
         exit 1;;
   esac
 done
+
+if [ -z "$out_dir" ]
+then
+  out_dir="$SCRIPT_DIR/out/$benchmark"
+fi
 
 if [ -z "$dataset_folder" ]
 then
@@ -80,6 +87,8 @@ then
   done
 fi
 
+mkdir -p "$out_dir"
+
 for dataset in "${datasets_array[@]}"
 do
   dataset_path="$dataset_folder/$dataset/$dataset.bin"
@@ -89,31 +98,25 @@ do
     continue
   fi
 
-  for benchmark in "${benchmarks[@]}"
-  do
-    tmp_out_dir="$out_dir/$benchmark"
-    mkdir -p "$tmp_out_dir"
+  rm -f "$out_dir/${dataset_basename}.out"
 
-    rm -f "$tmp_out_dir/${dataset_basename}.out"
-
-    echo "Running $benchmark on dataset $dataset_path"
-    sources_csv="${dataset_sources[$dataset]}"
-    if [ -n "$sources_csv" ]; then
-      IFS=',' read -r -a sources_array <<< "$sources_csv"
-      for source in "${sources_array[@]}"
-      do
-        if [ -z "$source" ]; then
-          continue
-        fi
-        echo "  Source: $source"
-        $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $enable_stealing -s "$source" >> "$tmp_out_dir/${dataset_basename}.out"
-      done
-    else
-      for ((run=1; run<=num_runs; run++))
-      do
-        echo "  Run $run/$num_runs"
-        $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $enable_stealing >> "$tmp_out_dir/${dataset_basename}.out"
-      done
-    fi
-  done
+  echo "Running $benchmark on dataset $dataset_path"
+  sources_csv="${dataset_sources[$dataset]}"
+  if [ -n "$sources_csv" ]; then
+    IFS=',' read -r -a sources_array <<< "$sources_csv"
+    for source in "${sources_array[@]}"
+    do
+      if [ -z "$source" ]; then
+        continue
+      fi
+      echo "  Source: $source"
+      $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $enable_stealing -s "$source" >> "$out_dir/${dataset_basename}.out"
+    done
+  else
+    for ((run=1; run<=num_runs; run++))
+    do
+      echo "  Run $run/$num_runs"
+      $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $enable_stealing >> "$out_dir/${dataset_basename}.out"
+    done
+  fi
 done
