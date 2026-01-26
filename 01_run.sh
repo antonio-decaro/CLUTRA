@@ -2,6 +2,32 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+dataset_folder=""
+
+while getopts :hsd: flag
+do
+  case "${flag}" in
+    d) dataset_folder=${OPTARG}; shift; shift;;
+    h) print_usage
+       exit 0;;
+    \?) echo "Invalid option: -${OPTARG}" >&2
+        print_usage
+        exit 1;;
+  esac
+done
+
+if [ -z "$dataset_folder" ]
+then
+  echo "Dataset folder not specified. Use -d to specify the dataset folder."
+  exit 1
+fi
+
+MEASURE_IMBALANCE_ARGS="-f $dataset_folder -d \
+hollywood-2009:1564,11421,31922,38428,42013,55662,74822,85126,116695,121253,138998,177997,187746,204768,206548,214421,237123,242557,245058,247188;\
+soc-orkut:2530,86966,96659,105537,111516,114017,146757,155403,168592,212213,217626,253758,268665,283564,284286,301658,302210,305642,320816,332954;\
+indochina-2004:56926,86450,148030,154316,155498,176597,182178,291167,328383,359632,369983,504618,579022,581598,587827,601202,604611,613033,615223,804644;\
+"
+
 function print_usage {
   echo "Usage: $0 <benchmark> [args...]"
   echo "  <benchmark> maps to a script named run_<benchmark>.shm or run_<benchmark>.sh"
@@ -16,23 +42,20 @@ fi
 benchmark="$1"
 shift
 
-script_candidates=(
-  "$SCRIPT_DIR/scripts/run_${benchmark}.shm"
-  "$SCRIPT_DIR/scripts/run_${benchmark}.sh"
-)
-
-target_script=""
-for candidate in "${script_candidates[@]}"; do
-  if [ -f "$candidate" ]; then
-    target_script="$candidate"
-    break
-  fi
-done
-
-if [ -z "$target_script" ]; then
-  echo "Unknown benchmark '$benchmark'. Expected a script named run_${benchmark}.shm or run_${benchmark}.sh."
-  print_usage
-  exit 1
-fi
-
-bash "$target_script" $SCRIPT_DIR "$@"
+case "$benchmark" in
+  *imbalance)
+    target_script="$SCRIPT_DIR/scripts/run_benchmark.sh"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/imbalance/no-stealing/ $MEASURE_IMBALANCE_ARGS
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/imbalance/stealing/ $MEASURE_IMBALANCE_ARGS -s
+    ;;
+  *benchmark)
+    target_script="$SCRIPT_DIR/scripts/run_benchmark.sh"
+    bash "$target_script" $SCRIPT_DIR "$@"
+    exit $?
+    ;;
+  *)
+    echo "Unknown benchmark: $benchmark"
+    print_usage
+    exit 1
+    ;;
+esac
