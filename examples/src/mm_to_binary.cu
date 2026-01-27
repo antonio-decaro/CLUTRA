@@ -21,8 +21,6 @@ void writeToFile(const std::string& filename, const clutra::formats::CSR<ValueT,
 }
 
 int main(int argc, char** argv) {
-  bool undirected = false;
-  (void)undirected; // currently not used
   if (argc < 3) {
     std::cerr << "Usage: " << argv[0] << " <MatrixMarket file format> <out>" << std::endl;
     return 1;

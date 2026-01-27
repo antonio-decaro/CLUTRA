@@ -49,7 +49,7 @@ struct StealerDevice {
    * @note Expected to be called once per block before the main loop.
    */
   __device__ void init(clutra::detail::utils::SharedQueue<BlockSize>*,
-                       SharedState<BlockSize>*) const;
+                       SharedState<BlockSize>&) const;
 
   template <size_t BlockSize>
   /**
@@ -59,7 +59,7 @@ struct StealerDevice {
    * @return 0 if no work was stolen; otherwise the number of items stolen.
    * @note This method is responsible for selecting the victim and performing atomics.
    */
-  __device__ int attemptStealing(SharedState<BlockSize>*,
+  __device__ int attemptStealing(SharedState<BlockSize>&,
                                  int) const;
 
   template <size_t BlockSize>
@@ -71,10 +71,10 @@ struct StealerDevice {
    * @param degree Output degree.
    * @note Calling this before a successful attemptStealing results in a no-op.
    */
-  __device__ void steal(SharedState<BlockSize>*,
+  __device__ void steal(SharedState<BlockSize>&,
                         int,
-                        uint32_t*,
-                        uint32_t*) const;
+                        uint32_t&,
+                        uint32_t&) const;
 
   template <size_t BlockSize>
   /**
@@ -97,23 +97,23 @@ struct NullStealerDevice : StealerDevice {
    * @brief No-op init for NullStealerDevice.
    */
   __device__ void init(clutra::detail::utils::SharedQueue<BlockSize>* local_queue,
-                       SharedState<BlockSize>* state) const {}
+                       SharedState<BlockSize>& state) const {}
 
   template <size_t BlockSize>
   /**
    * @brief No-op stealing attempt for NullStealerDevice.
    */
-  __device__ int attemptStealing(SharedState<BlockSize>* state,
+  __device__ int attemptStealing(SharedState<BlockSize>& state,
                                  int chunk_size) const {return 0;}
 
   template <size_t BlockSize>
   /**
    * @brief No-op steal for NullStealerDevice.
    */
-  __device__ void steal(SharedState<BlockSize>* state,
+  __device__ void steal(SharedState<BlockSize>& state,
                         int i,
-                        uint32_t*,
-                        uint32_t*) const {}
+                        uint32_t&,
+                        uint32_t&) const {}
 
   template <size_t BlockSize>
   /**
@@ -132,7 +132,7 @@ struct BasicStealerDevice : StealerDevice {
     int victim_rank;
     int steal_count;
     int steal_tail;
-    clutra::detail::utils::SharedQueue<BlockSize>* cluster_queues[4];
+    clutra::detail::utils::SharedQueue<BlockSize>* cluster_queues[8];
   };
 
   template <size_t BlockSize>
@@ -140,13 +140,13 @@ struct BasicStealerDevice : StealerDevice {
    * @brief Initialize cluster queue mapping for BasicStealerDevice.
    */
   __device__ void init(clutra::detail::utils::SharedQueue<BlockSize>* local_queue,
-                       SharedState<BlockSize>* state) const;
+                       SharedState<BlockSize>& state) const;
 
   template <size_t BlockSize>
   /**
    * @brief Attempt to steal a chunk from another block.
    */
-  __device__ int attemptStealing(SharedState<BlockSize>* state,
+  __device__ int attemptStealing(SharedState<BlockSize>& state,
                                  int chunk_size) const;
 
   template <size_t BlockSize>
@@ -154,10 +154,10 @@ struct BasicStealerDevice : StealerDevice {
    * @brief Fetch the i-th stolen item from the current victim.
    * @note Calling this before a successful attemptStealing results in a no-op.
    */
-  __device__ void steal(SharedState<BlockSize>* state,
+  __device__ void steal(SharedState<BlockSize>& state,
                         int i,
-                        uint32_t*,
-                        uint32_t*) const;
+                        uint32_t&,
+                        uint32_t&) const;
 
   template <size_t BlockSize>
   /**
