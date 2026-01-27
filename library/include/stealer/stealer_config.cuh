@@ -18,6 +18,7 @@ namespace clutra::stealer {
 struct StealerConfig final {
   bool intra_cluster_stealing_enabled = false;
   int preferred_cluster_size = 4;
+  int stealing_chunk_size = 16;
 };
 
 static_assert(std::is_trivially_copyable_v<StealerConfig>,

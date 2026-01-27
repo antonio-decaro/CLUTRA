@@ -144,9 +144,8 @@ __global__ void advanceKernel(GraphDevT graph_dev,
       continue;
     }
 
-    constexpr int STEAL_CHUNK = 16;
     while (true) {
-      const int steal_count = stealer.template attemptStealing<BlockSize>(&stealer_state, STEAL_CHUNK);
+      const int steal_count = stealer.template attemptStealing<BlockSize>(&stealer_state, stealer.getStealingChunkSize());
       if (steal_count == 0) {
         break;
       }

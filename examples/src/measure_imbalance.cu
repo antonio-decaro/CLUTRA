@@ -58,9 +58,9 @@ int main(int argc, char** argv) {
 
   GraphOptions opts;
   CLI::App app{"CLUTRA BFS"};
-  auto source_option = configureBaseCLI(app, opts);
+  auto cli_handles = configureBaseCLI(app, opts);
   CLI11_PARSE(app, argc, argv);
-  finalizeGraphOptions(opts, source_option);
+  finalizeGraphOptions(opts, cli_handles);
 
   std::cerr << "[*] Reading CSR" << std::endl;
   clutra::graph::Properties properties;
@@ -68,6 +68,7 @@ int main(int argc, char** argv) {
   std::cerr << "[*] CSR Building Graph" << std::endl;
   auto graph = clutra::graph::createGraph(csr, properties);
   printGraphInfo(graph);
+  printStealingOptions(opts, false);
   
   clutra::frontier::FrontierMLB<uint32_t> in_frontier(graph.getVertexCount());
   clutra::frontier::FrontierMLB<uint32_t> out_frontier(graph.getVertexCount());
@@ -86,7 +87,12 @@ int main(int argc, char** argv) {
   int iter = 0;
 
 
-  clutra::stealer::BasicStealer stealer({.intra_cluster_stealing_enabled = opts.stealing});
+  clutra::stealer::StealerConfig stealer_config{};
+  stealer_config.intra_cluster_stealing_enabled = opts.stealing;
+  if (opts.stealing_chunk_size.has_value()) {
+    stealer_config.stealing_chunk_size = *opts.stealing_chunk_size;
+  }
+  clutra::stealer::BasicStealer stealer(stealer_config);
   
   std::cout << "[*] Running BFS from source vertex " << opts.source << std::endl;
   while (!in_frontier.empty()) {

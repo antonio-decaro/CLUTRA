@@ -11,16 +11,6 @@ namespace cg = cooperative_groups;
 
 namespace clutra::stealer {
 
-
-__device__ bool StealerDevice::isStealingEnabled() const {
-#if __CUDA_ARCH__ >= 900
-  cg::cluster_group cluster = cg::this_cluster();
-  return config.intra_cluster_stealing_enabled && (cluster.dim_blocks().x > 1);
-#else
-  return false;
-#endif
-}
-
 template <size_t BlockSize>
 __device__ void StealerDevice::init(clutra::detail::utils::SharedQueue<BlockSize>*,
                                     SharedState<BlockSize>*) const {}
@@ -75,7 +65,7 @@ __device__ int BasicStealerDevice::attemptStealing(SharedState<BlockSize>* state
     for (int victim_offset = 1; victim_offset < cluster.dim_blocks().x; ++victim_offset) {
       int potential_victim_rank = (cluster.block_rank() + victim_offset) % cluster.dim_blocks().x;
       auto* victim_queue = state->cluster_queues[potential_victim_rank];
-      if (victim_queue->head < victim_queue->tail - (chunk_size * 2)) {
+      if (victim_queue->head < victim_queue->tail - (chunk_size + 16)) {
         state->steal_tail = atomicSub(&(victim_queue->tail), chunk_size);
         state->steal_count = chunk_size;
         state->victim_rank = potential_victim_rank;
@@ -104,7 +94,7 @@ __device__ void BasicStealerDevice::steal(SharedState<BlockSize>* state,
     return;
   }
   auto* victim_queue = state->cluster_queues[state->victim_rank];
-  const int index = state->steal_tail - 1 - i;
+  const int index = state->steal_tail - state->steal_count + i;
   *vertex = victim_queue->vertices[index];
   *degree = victim_queue->degrees[index];
 #else

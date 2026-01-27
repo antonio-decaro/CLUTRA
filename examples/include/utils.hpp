@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -24,12 +25,19 @@ struct GraphOptions {
   bool matrix_market = false;
   bool undirected = false;
   bool stealing = false;
+  std::optional<int> stealing_chunk_size;
   bool random_source = true;
   std::string path;
   size_t source = 0;
 };
 
-inline CLI::Option* configureBaseCLI(CLI::App& app, GraphOptions& opts) {
+struct CLIHandles {
+  CLI::Option* source_opt = nullptr;
+  CLI::Option* stealing_opt = nullptr;
+};
+
+inline CLIHandles configureBaseCLI(CLI::App& app, GraphOptions& opts) {
+  CLIHandles handles;
   auto binary_flag = app.add_flag("-b,--binary", opts.binary_format, "Treat input as binary CSR format");
   auto matrix_flag = app.add_flag("-m,--matrix-market", opts.matrix_market, "Treat input as Matrix Market format");
   if (binary_flag && matrix_flag) {
@@ -40,21 +48,31 @@ inline CLI::Option* configureBaseCLI(CLI::App& app, GraphOptions& opts) {
   app.add_flag("-p,--print", opts.print_output, "Print algorithm output to stdout");
   app.add_flag("-v,--validate", opts.validate, "Validate algorithm output against CPU implementation");
   app.add_flag("-u,--undirected", opts.undirected, "Treat input COO as an undirected graph");
-  app.add_flag("-t,--stealing", opts.stealing, "Enable work stealing in the advance operator");
+  handles.stealing_opt = app.add_option(
+      "-t,--stealing",
+      opts.stealing_chunk_size,
+      "Enable work stealing in the advance operator (optional chunk size)");
+  handles.stealing_opt->expected(0, 1);
+  handles.stealing_opt->check(CLI::PositiveNumber);
 
-  auto source_opt = app.add_option("-s,--source", opts.source, "Specify the source vertex");
-  source_opt->check(CLI::NonNegativeNumber);
+  handles.source_opt = app.add_option("-s,--source", opts.source, "Specify the source vertex");
+  handles.source_opt->check(CLI::NonNegativeNumber);
 
   app.add_option("graph", opts.path, "Path to the graph file")->required();
 
-  return source_opt;
+  return handles;
 }
 
-inline void finalizeGraphOptions(GraphOptions& opts, CLI::Option* source_opt) {
-  if (source_opt && source_opt->count() > 0) {
+inline void finalizeGraphOptions(GraphOptions& opts, const CLIHandles& handles) {
+  if (handles.source_opt && handles.source_opt->count() > 0) {
     opts.random_source = false;
   } else {
     opts.random_source = true;
+  }
+  if (handles.stealing_opt && handles.stealing_opt->count() > 0) {
+    opts.stealing = true;
+  } else {
+    opts.stealing = false;
   }
 }
 
@@ -108,14 +126,32 @@ inline size_t getRandomSource(size_t size) {
 }
 
 template<typename GraphT>
-void printGraphInfo(const GraphT& g) {
-  std::cerr << "-----------------------------------" << std::endl;
+void printGraphInfo(const GraphT& g, bool header = true, bool footer = true) {
+  if (header) {
+    std::cerr << "-----------------------------------" << std::endl;
+  }
   std::cerr << std::left;
   std::cerr << std::setw(17) << "Vertex count:" << std::setw(10) << g.getVertexCount() << std::endl;
   std::cerr << std::setw(17) << "Edge count:" << std::setw(10) << g.getEdgeCount() << std::endl;
   std::cerr << std::setw(17) << "Average degree:" << std::setw(10) << g.getEdgeCount() / g.getVertexCount() << std::endl;
   std::cerr << std::setw(17) << "Directed:" << std::setw(10) << (g.getProperties().directed ? "yes" : "no") << std::endl;
-  std::cerr << "-----------------------------------" << std::endl;
+  if (footer) {
+    std::cerr << "-----------------------------------" << std::endl;
+  }
+}
+
+inline void printStealingOptions(const GraphOptions& opts, bool header = true, bool footer = true) {
+  if (header) {
+    std::cerr << "-----------------------------------" << std::endl;
+  }
+  std::cerr << std::left;
+  std::cerr << std::setw(26) << "Stealing enabled:" << std::setw(10) << (opts.stealing ? "yes" : "no") << std::endl;
+  std::cerr << std::setw(26) << "Stealing chunk size:" << std::setw(10)
+            << (opts.stealing_chunk_size.has_value() ? std::to_string(*opts.stealing_chunk_size) : "default")
+            << std::endl;
+  if (footer) {
+    std::cerr << "-----------------------------------" << std::endl;
+  }
 }
 
 inline void printDeviceInfo(std::string prefix = "") {
