@@ -35,6 +35,7 @@ struct Options {
 struct CLIHandles {
   CLI::Option* source_opt = nullptr;
   CLI::Option* stealing_opt = nullptr;
+  CLI::Option* stealing_chunk_size_opt = nullptr;
   CLI::Option* cluster_size_opt = nullptr;
 };
 
@@ -52,12 +53,14 @@ inline CLIHandles configureBaseCLI(CLI::App& app, Options& opts) {
   app.add_flag("-u,--undirected", opts.undirected, "Treat input COO as an undirected graph");
   handles.cluster_size_opt = app.add_option("-c,--cluster-size", opts.cluster_size, "Set the cluster size for intra-cluster work stealing (default: 4)");
   handles.cluster_size_opt->check(CLI::Range(1, 8));
-  handles.stealing_opt = app.add_option(
-      "-t,--stealing",
+  handles.stealing_opt = app.add_flag("-t,--stealing", opts.stealing, "Enable work stealing in the advance operator");
+  handles.stealing_chunk_size_opt = app.add_option(
+      "--chunk-size",
       opts.stealing_chunk_size,
-      "Enable work stealing in the advance operator (optional chunk size)");
-  handles.stealing_opt->expected(0, 1);
-  handles.stealing_opt->check(CLI::PositiveNumber);
+      "Set the stealing chunk size (requires stealing)");
+  handles.stealing_chunk_size_opt->check(CLI::PositiveNumber);
+  handles.stealing_chunk_size_opt->needs(handles.stealing_opt);
+  handles.cluster_size_opt->needs(handles.stealing_opt);
 
   handles.source_opt = app.add_option("-s,--source", opts.source, "Specify the source vertex");
   handles.source_opt->check(CLI::NonNegativeNumber);
