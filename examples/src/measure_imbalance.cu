@@ -56,7 +56,7 @@ void printTraversedEdges(const int* traversed_edges, const size_t size, size_t b
 
 int main(int argc, char** argv) {
 
-  GraphOptions opts;
+  Options opts;
   CLI::App app{"CLUTRA BFS"};
   auto cli_handles = configureBaseCLI(app, opts);
   CLI11_PARSE(app, argc, argv);
@@ -86,12 +86,7 @@ int main(int argc, char** argv) {
   
   int iter = 0;
 
-
-  clutra::stealer::StealerConfig stealer_config{};
-  stealer_config.intra_cluster_stealing_enabled = opts.stealing;
-  if (opts.stealing_chunk_size.has_value()) {
-    stealer_config.stealing_chunk_size = *opts.stealing_chunk_size;
-  }
+  auto stealer_config = getStealingConfig(opts);
   clutra::stealer::BasicStealer stealer(stealer_config);
   
   std::cout << "[*] Running BFS from source vertex " << opts.source << std::endl;

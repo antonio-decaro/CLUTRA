@@ -57,7 +57,6 @@ __device__ int BasicStealerDevice::attemptStealing(SharedState<BlockSize>& state
   if (!config.intra_cluster_stealing_enabled) {
     return 0;
   }
-
   auto cluster = cg::this_cluster();
   if (threadIdx.x == 0) {
     state.steal_count = 0;
@@ -65,8 +64,13 @@ __device__ int BasicStealerDevice::attemptStealing(SharedState<BlockSize>& state
     for (int victim_offset = 1; victim_offset < cluster.dim_blocks().x; ++victim_offset) {
       int potential_victim_rank = (cluster.block_rank() + victim_offset) % cluster.dim_blocks().x;
       auto* victim_queue = state.cluster_queues[potential_victim_rank];
-      if (victim_queue->head < victim_queue->tail - (chunk_size + 16)) {
-        state.steal_tail = atomicSub(&(victim_queue->tail), chunk_size);
+      const int tail_snapshot = victim_queue->tail;
+      if (victim_queue->head < tail_snapshot - (chunk_size)) {
+        if (atomicCAS(&(victim_queue->tail), tail_snapshot, tail_snapshot - chunk_size) != tail_snapshot) {
+          // Another block beat us to stealing from this victim; try next.
+          continue;
+        }
+        state.steal_tail = tail_snapshot;
         state.steal_count = chunk_size;
         state.victim_rank = potential_victim_rank;
         // printf("Stealing from block %d by block %d: steal_count=%d\n",

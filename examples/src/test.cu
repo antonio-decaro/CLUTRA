@@ -4,7 +4,7 @@
 
 int main(int argc, char** argv) {
 
-  GraphOptions opts;
+  Options opts;
   CLI::App app{"CLUTRA example"};
   auto cli_handles = configureBaseCLI(app, opts);
   CLI11_PARSE(app, argc, argv);

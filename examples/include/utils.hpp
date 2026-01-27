@@ -18,7 +18,7 @@
 
 #include <clutra.hpp>
 
-struct GraphOptions {
+struct Options {
   bool print_output = false;
   bool validate = false;
   bool binary_format = false;
@@ -28,15 +28,17 @@ struct GraphOptions {
   std::optional<int> stealing_chunk_size;
   bool random_source = true;
   std::string path;
+  int cluster_size = 4;
   size_t source = 0;
 };
 
 struct CLIHandles {
   CLI::Option* source_opt = nullptr;
   CLI::Option* stealing_opt = nullptr;
+  CLI::Option* cluster_size_opt = nullptr;
 };
 
-inline CLIHandles configureBaseCLI(CLI::App& app, GraphOptions& opts) {
+inline CLIHandles configureBaseCLI(CLI::App& app, Options& opts) {
   CLIHandles handles;
   auto binary_flag = app.add_flag("-b,--binary", opts.binary_format, "Treat input as binary CSR format");
   auto matrix_flag = app.add_flag("-m,--matrix-market", opts.matrix_market, "Treat input as Matrix Market format");
@@ -48,6 +50,7 @@ inline CLIHandles configureBaseCLI(CLI::App& app, GraphOptions& opts) {
   app.add_flag("-p,--print", opts.print_output, "Print algorithm output to stdout");
   app.add_flag("-v,--validate", opts.validate, "Validate algorithm output against CPU implementation");
   app.add_flag("-u,--undirected", opts.undirected, "Treat input COO as an undirected graph");
+  handles.cluster_size_opt = app.add_option("-c,--cluster-size", opts.cluster_size, "Set the cluster size for intra-cluster work stealing (default: 4)");
   handles.stealing_opt = app.add_option(
       "-t,--stealing",
       opts.stealing_chunk_size,
@@ -63,7 +66,7 @@ inline CLIHandles configureBaseCLI(CLI::App& app, GraphOptions& opts) {
   return handles;
 }
 
-inline void finalizeGraphOptions(GraphOptions& opts, const CLIHandles& handles) {
+inline void finalizeGraphOptions(Options& opts, const CLIHandles& handles) {
   if (handles.source_opt && handles.source_opt->count() > 0) {
     opts.random_source = false;
   } else {
@@ -76,8 +79,18 @@ inline void finalizeGraphOptions(GraphOptions& opts, const CLIHandles& handles) 
   }
 }
 
+inline clutra::stealer::StealerConfig getStealingConfig(const Options& opts) {
+  clutra::stealer::StealerConfig config{};
+  config.intra_cluster_stealing_enabled = opts.stealing;
+  if (opts.stealing_chunk_size.has_value()) {
+    config.stealing_chunk_size = *opts.stealing_chunk_size;
+  }
+  config.preferred_cluster_size = opts.cluster_size;
+  return config;
+}
+
 template<typename ValueT, typename IndexT, typename OffsetT>
-clutra::formats::CSR<ValueT, IndexT, OffsetT> readCSR(const GraphOptions& opts, clutra::graph::Properties* properties = nullptr) {
+clutra::formats::CSR<ValueT, IndexT, OffsetT> readCSR(const Options& opts, clutra::graph::Properties* properties = nullptr) {
   clutra::formats::CSR<ValueT, IndexT, OffsetT> csr;
   clutra::graph::Properties local_properties;
   auto* props = properties ? properties : &local_properties;
@@ -140,7 +153,7 @@ void printGraphInfo(const GraphT& g, bool header = true, bool footer = true) {
   }
 }
 
-inline void printStealingOptions(const GraphOptions& opts, bool header = true, bool footer = true) {
+inline void printStealingOptions(const Options& opts, bool header = true, bool footer = true) {
   if (header) {
     std::cerr << "-----------------------------------" << std::endl;
   }
@@ -149,6 +162,7 @@ inline void printStealingOptions(const GraphOptions& opts, bool header = true, b
   std::cerr << std::setw(26) << "Stealing chunk size:" << std::setw(10)
             << (opts.stealing_chunk_size.has_value() ? std::to_string(*opts.stealing_chunk_size) : "default")
             << std::endl;
+  std::cerr << std::setw(26) << "Cluster size:" << std::setw(10) << opts.cluster_size << std::endl;
   if (footer) {
     std::cerr << "-----------------------------------" << std::endl;
   }

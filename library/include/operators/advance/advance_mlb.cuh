@@ -152,13 +152,13 @@ __global__ void advanceKernel(GraphDevT graph_dev,
       uint32_t steal_degree = 0;
       for (int i = 0; i < steal_count; ++i) {
         stealer.template steal<BlockSize>(stealer_state, i, steal_vertex, steal_degree);
-        // processVertexRange<Direction>(graph_dev,
-        //   out_dev_frontier,
-        //   functor,
-        //   steal_vertex,
-        //   steal_degree,
-        //   tid,
-        //   block_dim);
+        processVertexRange<Direction>(graph_dev,
+          out_dev_frontier,
+          functor,
+          steal_vertex,
+          steal_degree,
+          tid,
+          block_dim);
       }
       __syncthreads();
     }
