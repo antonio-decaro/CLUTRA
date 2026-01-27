@@ -58,7 +58,8 @@ __device__ int BasicStealerDevice::attemptStealing(SharedState<BlockSize>& state
     return 0;
   }
   auto cluster = cg::this_cluster();
-  if (threadIdx.x == 0) {
+  auto block = cg::this_thread_block();
+  cg::invoke_one(block,[&]() {
     state.steal_count = 0;
     state.victim_rank = -1;
     for (int victim_offset = 1; victim_offset < cluster.dim_blocks().x; ++victim_offset) {
@@ -78,8 +79,8 @@ __device__ int BasicStealerDevice::attemptStealing(SharedState<BlockSize>& state
         break;
       }
     }
-  }
-  __syncthreads();
+  });
+  block.sync();
   return state.steal_count;
 #else
   (void)state;
