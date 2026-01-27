@@ -51,6 +51,7 @@ inline CLIHandles configureBaseCLI(CLI::App& app, Options& opts) {
   app.add_flag("-v,--validate", opts.validate, "Validate algorithm output against CPU implementation");
   app.add_flag("-u,--undirected", opts.undirected, "Treat input COO as an undirected graph");
   handles.cluster_size_opt = app.add_option("-c,--cluster-size", opts.cluster_size, "Set the cluster size for intra-cluster work stealing (default: 4)");
+  handles.cluster_size_opt->check(CLI::Range(1, 8));
   handles.stealing_opt = app.add_option(
       "-t,--stealing",
       opts.stealing_chunk_size,
