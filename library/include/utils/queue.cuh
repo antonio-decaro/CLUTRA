@@ -27,7 +27,8 @@ struct SharedQueue {
   }
 
   __forceinline__ __device__ bool pop(uint32_t& vertex, uint32_t& degree) {
-    if (head < 0 || head >= tail) {
+    const int tail_snapshot = atomicAdd(&tail, 0);
+    if (head < 0 || head >= tail_snapshot) {
       return false; // empty
     }
     
