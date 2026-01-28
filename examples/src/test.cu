@@ -62,6 +62,6 @@ int main(int argc, char** argv) {
   }
   
   std::cout << frontier.size() << " elements in the frontier." << std::endl;
-  clutra::profile::KernelProfilerManager::instance().printSummary();
+  clutra::profile::KernelProfilerManager::instance().printSummary(opts.profiling_detail);
   return 0;
 }

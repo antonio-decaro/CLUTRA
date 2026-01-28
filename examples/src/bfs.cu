@@ -111,5 +111,5 @@ int main(int argc, char** argv) {
   
   cudaFree(distances);
 
-  clutra::profile::KernelProfilerManager::instance().printSummary();
+  clutra::profile::KernelProfilerManager::instance().printSummary(opts.profiling_detail);
 }

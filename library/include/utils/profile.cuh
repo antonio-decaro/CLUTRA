@@ -11,6 +11,7 @@
 #include <mutex>
 #include <string>
 #include <map>
+#include <vector>
 
 namespace clutra::profile {
 
@@ -30,6 +31,7 @@ public:
     KernelStat& stat = stage_stats.kernels[kernel_name];
     stat.count += 1;
     stat.total_ms += ms;
+    stat.events_ms.push_back(ms);
     stage_stats.total_ms += ms;
   }
 
@@ -38,7 +40,7 @@ public:
     _stats.clear();
   }
 
-  void printSummary() const {
+  void printSummary(bool detail = false) const {
     std::lock_guard<std::mutex> lock(_mutex);
     std::printf("==== CUDA Kernel Profiling Summary ====\n");
     double grand_total = 0.0;
@@ -49,12 +51,22 @@ public:
       for (const auto& kernel_pair : stage_stat.kernels) {
         const std::string& kernel = kernel_pair.first;
         const KernelStat& stat = kernel_pair.second;
-        double avg = stat.count ? (stat.total_ms / static_cast<double>(stat.count)) : 0.0;
-        std::printf("  %s -> runs: %llu, total: %.3f ms, avg: %.3f ms\n",
-                    kernel.c_str(),
-                    static_cast<unsigned long long>(stat.count),
-                    stat.total_ms,
-                    avg);
+        if (detail) {
+          std::printf("  %s -> runs: %llu, events: ",
+                      kernel.c_str(),
+                      static_cast<unsigned long long>(stat.count));
+          for (size_t i = 0; i < stat.events_ms.size(); ++i) {
+            std::printf("%.3f ms%s", stat.events_ms[i], (i + 1 < stat.events_ms.size()) ? ", " : "");
+          }
+          std::printf("\n");
+        } else {
+          double avg = stat.count ? (stat.total_ms / static_cast<double>(stat.count)) : 0.0;
+          std::printf("  %s -> runs: %llu, total: %.3f ms, avg: %.3f ms\n",
+                      kernel.c_str(),
+                      static_cast<unsigned long long>(stat.count),
+                      stat.total_ms,
+                      avg);
+        }
       }
       grand_total += stage_stat.total_ms;
     }
@@ -66,6 +78,7 @@ private:
   struct KernelStat {
     uint64_t count = 0;
     double total_ms = 0.0;
+    std::vector<double> events_ms;
   };
 
   struct StageStat {
@@ -86,7 +99,7 @@ public:
 
   void record(const char*, const char*, float) {}
   void reset() {}
-  void printSummary() const {}
+  void printSummary(bool = false) const {}
 };
 #endif
 

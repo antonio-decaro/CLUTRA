@@ -132,5 +132,5 @@ int main(int argc, char** argv) {
   cudaFree(distances);
   cudaFree(traversed_edges);
 
-  clutra::profile::KernelProfilerManager::instance().printSummary();
+  clutra::profile::KernelProfilerManager::instance().printSummary(opts.profiling_detail);
 }
