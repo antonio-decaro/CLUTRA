@@ -18,6 +18,16 @@ project(CLUTRA
     LANGUAGES CXX CUDA
 )
 
+# Fetch header-only dependencies.
+include(FetchContent)
+FetchContent_Declare(
+  fmt
+  GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+  GIT_TAG 10.2.1
+  GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(fmt)
+
 # Find CUDA toolkit (provides Thrust headers and CUDA runtime target)
 find_package(CUDAToolkit REQUIRED)
 

@@ -4,10 +4,11 @@
 
 int main(int argc, char** argv) {
 
-  GraphOptions opts;
+  Options opts;
   CLI::App app{"CLUTRA example"};
-  auto source_option = configureBaseCLI(app, opts);
+  auto cli_handles = configureBaseCLI(app, opts);
   CLI11_PARSE(app, argc, argv);
+  finalizeGraphOptions(opts, cli_handles);
 
   std::cerr << "[*] Reading CSR" << std::endl;
   clutra::graph::Properties properties;
@@ -15,6 +16,7 @@ int main(int argc, char** argv) {
   auto graph = clutra::graph::createGraph(csr, properties);
   std::cerr << "[*] CSR read complete" << std::endl;
   printGraphInfo(graph);
+  printStealingOptions(opts);
   
   
   clutra::frontier::FrontierMLB<uint32_t> frontier(1024);

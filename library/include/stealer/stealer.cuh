@@ -5,59 +5,47 @@
 
 #pragma once
 #include <cuda_runtime.h>
-#include <type_traits>
-#include "device_stealer_concept.cuh"
+#include <stealer/stealer_config.cuh>
+#include <stealer/stealer_device.cuh>
 
 namespace clutra::stealer {
 
 /**
- * @brief No-op stealer used as the default implementation.
- * @note This object should be device-compatible.
+ * @brief Host-side stealer configuration and state.
+ * @details Owns host configuration and produces a device-side view for kernels.
  */
-struct NullStealer final {
-  __host__ __device__ void steal() {}
-};
-static_assert(DeviceStealerConcept<NullStealer>,
-              "NullStealer must satisfy DeviceStealerConcept");
-
-/**
- * @brief Configuration for the Stealer component.
- * @details This structure holds configuration options for enabling or disabling
- * various stealing strategies such as thread stealing, block stealing, and grid stealing.
- * @note This object should be device-compatible.
- */
-class StealerConfig final {
+template <typename DerivedT, typename DeviceStealerT>
+class StealerBase {
 public:
-  bool thread_stealing_enabled = false;
-  bool block_stealing_enabled = false;
-  bool grid_stealing_enabled = false;
-};
+  __host__ StealerBase() : _config() {}
+  __host__ StealerBase(const StealerConfig& config) : _config(config) {}
 
-static_assert(std::is_trivially_copyable_v<StealerConfig>,
-              "StealerConfig must be trivially copyable for device use");
-static_assert(std::is_standard_layout_v<StealerConfig>,
-              "StealerConfig should be standard layout");
-
-/**
- * @brief Stealer component for managing work stealing strategies.
- * @details This class implements various work stealing strategies based on the provided configuration.
- * @note This object should be device-compatible.
- */
-template <clutra::stealer::DeviceStealerConcept StealerT = NullStealer>
-class Stealer {
-public:
-  __host__ Stealer() : _config() {}
-  __host__ Stealer(const StealerConfig& config) : _config(config) {}
+  __host__ void enableIntraClusterStealing() { _config.intra_cluster_stealing_enabled = true; }
+  __host__ void disableIntraClusterStealing() { _config.intra_cluster_stealing_enabled = false; }
   
-  __forceinline__ __host__ __device__ bool isThreadStealingEnabled() const { return _config.thread_stealing_enabled; }
-  __forceinline__ __host__ __device__ bool isBlockStealingEnabled() const { return _config.block_stealing_enabled; }
-  __forceinline__ __host__ __device__ bool isGridStealingEnabled() const { return _config.grid_stealing_enabled; }
-      
-  __device__ void steal() { _stealer_impl.steal(); }
+  __host__ bool isIntraClusterStealingEnabled() const { return _config.intra_cluster_stealing_enabled; }
+  __host__ int getPreferredClusterSize() const { return _config.preferred_cluster_size; }
 
-private:
-  StealerT _stealer_impl;
+  __host__ DeviceStealerT getDeviceStealer() const {
+    return DeviceStealerT{_config};
+  }
+
+protected:
   StealerConfig _config;
 };
-              
+
+/**
+ * @brief A no-operation stealer implementation.
+ * @details This stealer does not perform any stealing operation.
+ */
+class NullStealer : public StealerBase<NullStealer, NullStealerDevice> {
+public:
+  __host__ NullStealer() : StealerBase<NullStealer, NullStealerDevice>() {}
+};
+
+class BasicStealer : public StealerBase<BasicStealer, BasicStealerDevice> {
+public:
+  __host__ BasicStealer(const StealerConfig& config = {}) : StealerBase<BasicStealer, BasicStealerDevice>(config) {}
+};
+
 } // namespace clutra::stealer
