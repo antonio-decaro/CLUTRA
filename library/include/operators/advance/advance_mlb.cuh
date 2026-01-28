@@ -97,7 +97,7 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   const int block_dim = blockDim.x;
   auto& warp_queue = warp_queues[warp_id];
 
-  stealer.template init<BlockSize>(&cta_queue, stealer_state);
+  if (stealer.isStealingEnabled()) { stealer.template init<BlockSize>(&cta_queue, stealer_state); }
 
   const uint32_t active_size = in_dev_frontier.getOffsetsSize()[0];
   const uint32_t bitmap_range = in_dev_frontier.getBitmapRange();
@@ -142,26 +142,26 @@ __global__ void advanceKernel(GraphDevT graph_dev,
     }
 
   }
-  if (stealer.isStealingEnabled()) { 
-    while (true) {
-      const int steal_count = stealer.template attemptStealing<BlockSize>(stealer_state, stealer.getStealingChunkSize());
-      if (steal_count == 0) {
-        break;
-      }
-      uint32_t steal_vertex = 0;
-      uint32_t steal_degree = 0;
-      for (int i = 0; i < steal_count; ++i) {
-        stealer.template steal<BlockSize>(stealer_state, i, steal_vertex, steal_degree);
-        processVertexRange<Direction>(graph_dev,
-          out_dev_frontier,
-          functor,
-          steal_vertex,
-          steal_degree,
-          tid,
-          block_dim);
-      }
-      __syncthreads();
+  if (!stealer.isStealingEnabled()) { return ; }
+
+  while (true) {
+    const int steal_count = stealer.template attemptStealing<BlockSize>(stealer_state, stealer.getStealingChunkSize());
+    if (steal_count == 0) {
+      break;
     }
+    uint32_t steal_vertex = 0;
+    uint32_t steal_degree = 0;
+    for (int i = 0; i < steal_count; ++i) {
+      stealer.template steal<BlockSize>(stealer_state, i, steal_vertex, steal_degree);
+      processVertexRange<Direction>(graph_dev,
+        out_dev_frontier,
+        functor,
+        steal_vertex,
+        steal_degree,
+        tid,
+        block_dim);
+    }
+    __syncthreads();
   }
 
   stealer.template finalize<BlockSize>();

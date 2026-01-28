@@ -34,9 +34,6 @@ template <size_t BlockSize>
 __device__ void BasicStealerDevice::init(clutra::detail::utils::SharedQueue<BlockSize>* local_queue,
                                          SharedState<BlockSize>& state) const {
 #if __CUDA_ARCH__ >= 900
-  if (!config.intra_cluster_stealing_enabled) {
-    return;
-  }
   auto cluster = cg::this_cluster();
   cluster.sync();
   state.cluster_queues[cluster.block_rank()] = local_queue;
@@ -54,9 +51,6 @@ template <size_t BlockSize>
 __device__ int BasicStealerDevice::attemptStealing(SharedState<BlockSize>& state,
                                                    int chunk_size) const {
 #if __CUDA_ARCH__ >= 900
-  if (!config.intra_cluster_stealing_enabled) {
-    return 0;
-  }
   auto cluster = cg::this_cluster();
   auto block = cg::this_thread_block();
   cg::invoke_one(block,[&]() {
@@ -115,9 +109,6 @@ __device__ void BasicStealerDevice::steal(SharedState<BlockSize>& state,
 template <size_t BlockSize>
 __device__ void BasicStealerDevice::finalize() const {
 #if __CUDA_ARCH__ >= 900
-  if (!config.intra_cluster_stealing_enabled) {
-    return;
-  }
   auto cluster = cg::this_cluster();
   cluster.sync();
 #endif

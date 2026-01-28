@@ -2,6 +2,9 @@
 #include "utils.hpp"
 #include <iostream>
 
+// Prevents the compiler from optimizing away synthetic work in the BFS kernel.
+__device__ unsigned long long g_work_sink = 0;
+
 template<typename GraphT>
 bool validate(const GraphT& graph, const int* device_distances, const uint source) {
   std::vector<uint32_t> distances(graph.getVertexCount(), graph.getVertexCount() + 1);
