@@ -203,9 +203,84 @@ protected:
   uint32_t* _host_offsets_size = nullptr; ///< Host-pinned mirror of offsets_size.
 };
 
-template<typename T, size_t Levels>
-void swap(FrontierMLB<T, Levels>& first, FrontierMLB<T, Levels>& second) {
-  FrontierMLB<T, Levels>::swap(first, second);
+namespace detail {
+struct VectorFrontierDevice {
+  uint32_t* _data;
+  uint32_t* _size;
+  uint32_t _capacity;
+
+  VectorFrontierDevice() : _data(nullptr), _size(nullptr), _capacity(0) {}
+  VectorFrontierDevice(uint32_t capacity) : _data(nullptr), _size(nullptr), _capacity(capacity) {}
+  VectorFrontierDevice(uint32_t* raw_ptr, uint32_t* size_ptr, uint32_t capacity) : _data(raw_ptr), _size(size_ptr), _capacity(capacity) {}
+
+  __host__ void setData(uint32_t* data) { _data = data; }
+  __host__ void setCapacity(uint32_t capacity) { _capacity = capacity; }
+  __host__ void setSize(uint32_t* size) { _size = size; }
+  
+  __host__ __device__ inline uint32_t* getData() const noexcept {return _data;}
+  __host__ __device__ inline uint32_t getCapacity() const noexcept {return _capacity;}
+  __device__ inline uint32_t getSize() const noexcept {return *_size;}
+
+  __device__ inline void insert(uint32_t idx, uint32_t pos) const noexcept {
+    if (pos >= _capacity) return;
+    _data[pos] = idx;
+  };
+
+  __device__ inline uint32_t get(uint32_t pos) const noexcept {
+    if (pos >= _capacity) return UINT32_MAX;
+    return _data[pos];
+  };
+
+  __device__ inline int increaseSize(uint32_t increment) noexcept {
+    return atomicAdd(_size, increment);
+  }
+
+  __device__ inline void reset() const noexcept {
+    *_size = 0;
+  }
+
+  __device__ inline bool empty() const noexcept {
+    return *_size == 0;
+  }
+};
+
+} // namespace detail
+
+class VectorFrontier {
+public:
+
+  VectorFrontier(size_t capacity);
+  VectorFrontier(const VectorFrontier& other);
+  VectorFrontier(VectorFrontier&& other) noexcept;
+  ~VectorFrontier();
+
+  bool empty() const;
+  size_t size() const;
+  bool insert(size_t idx);
+  void clear();
+
+  const detail::VectorFrontierDevice& getDeviceFrontier() const { return _vector_frontier; }
+  size_t getCapacity() const;
+
+  void invalidateDuplicates();
+
+  VectorFrontier& operator=(const VectorFrontier& other);
+  VectorFrontier& operator=(VectorFrontier&& other) noexcept;
+
+  static void swap(VectorFrontier& first, VectorFrontier& second) noexcept {
+    std::swap(first._vector_frontier, second._vector_frontier);
+    std::swap(first._host_frontier_size, second._host_frontier_size);
+  }
+
+private:
+  detail::VectorFrontierDevice _vector_frontier;
+  uint32_t* _host_frontier_size = nullptr;
+};
+
+
+template<typename FrontierT>
+void swap(FrontierT& first, FrontierT& second) {
+  FrontierT::swap(first, second);
 }
 
 } // namespace clutra::frontier
