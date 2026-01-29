@@ -77,6 +77,19 @@ __device__ __forceinline__ bool checkVertexActive(const FrontierDevT& in_dev_fro
   }
 }
 
+template<size_t BlockSize>
+size_t getAdvanceSharedMemorySize(size_t stealer_shared_size) {
+  constexpr size_t WARP_SIZE = 32;
+  size_t shared_size = 0;
+  // CTA queue
+  shared_size += clutra::detail::utils::SharedQueue<BlockSize>::getSizeInBytes();
+  // Warp queues
+  shared_size += (BlockSize / WARP_SIZE) * clutra::detail::utils::SharedQueue<WARP_SIZE>::getSizeInBytes();
+  // Stealer shared state
+  shared_size += stealer_shared_size;
+  return shared_size;
+}
+
 template<advance_direction Direction, size_t BlockSize, graph::detail::DeviceGraphConcept GraphDevT, typename InFrontierDevT, typename OutFrontierDevT, typename StealerDeviceT, typename LambdaT>
 __global__ void advanceKernel(GraphDevT graph_dev,
                               InFrontierDevT in_dev_frontier,
@@ -192,18 +205,25 @@ void launchKernel(const GraphT& graph,
   const size_t work_tiles = ((active_size * bitmap_range) + block_size - 1) / block_size;
   int device_id = 0;
   CUDA_CHECK(cudaGetDevice(&device_id));
-  const size_t grid_size = clutra::detail::device::getMaxNumBlocks(block_size, device_id);
+
+  const size_t smem = getAdvanceSharedMemorySize<CU_SIZE>(stealer.template getSharedStateSizeInBytes<CU_SIZE>());
+  const size_t grid_size = clutra::detail::device::getMaxOccupancyGridSize(device_id,
+                                                  block_size,
+                                                  smem,
+                                                  advanceKernel<Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier), frontier::detail::NullFrontierDevice, decltype(stealer.getDeviceStealer()), LambdaT>);
+  // const size_t grid_size = 1024; //clutra::detail::device::getMaxNumBlocks(block_size, device_id);
   // const size_t grid_size = (active_size * bitmap_range + (block_size - 1)) / block_size;
   const size_t cluster_size = stealer.getPreferredClusterSize();
   auto launch_config = clutra::detail::kernels::adjustLaunchConfig(grid_size, block_size, cluster_size, work_tiles, stealer);
 
-  clutra::detail::log("Advance Operator Launch - Active Size: {}, Direction: {}, Grid Size: {} (was {}), Block Size: {}, Cluster Size: {}, Stealing Enabled: {}",
+  clutra::detail::log("Advance Operator Launch - Active Size: {}, Direction: {}, Grid Size: {} (was {}), Block Size: {}, Cluster Size: {}, SMEM: {}, Stealing Enabled: {}",
                    active_size,
                    (Direction == advance_direction::push) ? "Push" : "Pull",
                    launch_config.grid_size,
-                   work_tiles,
+                   grid_size,
                    launch_config.block_size,
                    launch_config.cluster_size,
+                   smem,
                    stealer.isIntraClusterStealingEnabled() ? "Yes" : "No");
                 
   // launch advance kernel

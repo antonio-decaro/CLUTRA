@@ -5,6 +5,7 @@
 
 #pragma once
 #include <cuda_runtime.h>
+#include <stdexcept>
 #include <stealer/stealer_config.cuh>
 #include <stealer/stealer_device.cuh>
 
@@ -25,6 +26,11 @@ public:
   
   __host__ bool isIntraClusterStealingEnabled() const { return _config.intra_cluster_stealing_enabled; }
   __host__ int getPreferredClusterSize() const { return _config.preferred_cluster_size; }
+
+  template <size_t BlockSize>
+  __host__ size_t getSharedStateSizeInBytes() const {
+    return sizeof(typename DeviceStealerT::template SharedState<BlockSize>);
+  }
 
   __host__ DeviceStealerT getDeviceStealer() const {
     return DeviceStealerT{_config};

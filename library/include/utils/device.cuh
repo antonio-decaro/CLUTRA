@@ -41,4 +41,18 @@ __host__ inline size_t getMaxNumBlocks(size_t block_size, int device_id) {
   return max_blocks_per_sm * num_sms;
 }
 
+template <typename T>
+__host__ inline size_t getMaxOccupancyGridSize(int device_id, size_t block_size, size_t smem_bytes, T&& kernel) {
+  int num_sms = getNumSMs(device_id);
+  int maxBlocksPerSM;
+  cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+      &maxBlocksPerSM,
+      kernel,
+      block_size,
+      smem_bytes);
+
+  int grid = num_sms * maxBlocksPerSM; // full occupancy persistent grid
+  return grid;
 }
+
+} // namespace clutra::detail::device

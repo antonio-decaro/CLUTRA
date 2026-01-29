@@ -17,6 +17,10 @@ struct SharedQueue {
   uint32_t vertices[Capacity];
   uint32_t degrees[Capacity];
 
+  __host__ static size_t getSizeInBytes() {
+    return sizeof(SharedQueue<Capacity>);
+  }
+
   __device__ void init() { tail = 0; head = 0;}
 
   __forceinline__ __device__ int push(uint32_t vertex, uint32_t degree) {
