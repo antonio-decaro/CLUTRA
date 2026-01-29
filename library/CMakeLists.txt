@@ -39,10 +39,6 @@ target_include_directories(clutra PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 target_link_libraries(clutra PUBLIC fmt::fmt-header-only)
-target_compile_definitions(clutra PUBLIC
-  $<$<CONFIG:Debug>:CLUTRA_DEBUG_LOG=1>
-  $<$<NOT:$<CONFIG:Debug>>:CLUTRA_DEBUG_LOG=0>
-)
 
 # If the library was created as a compiled target, set properties and link CUDA runtime
 get_target_property(_clutra_type clutra TYPE)
