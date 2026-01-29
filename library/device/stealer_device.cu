@@ -56,11 +56,12 @@ __device__ int BasicStealerDevice::attemptStealing(SharedState<BlockSize>& state
   cg::invoke_one(block,[&]() {
     state.steal_count = 0;
     state.victim_rank = -1;
-    for (int victim_offset = 1; victim_offset < cluster.dim_blocks().x; ++victim_offset) {
-      int potential_victim_rank = (cluster.block_rank() + victim_offset) % cluster.dim_blocks().x;
+    constexpr int GUARD = 16;
+    for (int16_t victim_offset = 1; victim_offset < cluster.dim_blocks().x; ++victim_offset) {
+      int16_t potential_victim_rank = (cluster.block_rank() + victim_offset) % cluster.dim_blocks().x;
       auto* victim_queue = state.cluster_queues[potential_victim_rank];
       const int tail_snapshot = victim_queue->tail;
-      if (victim_queue->head < tail_snapshot - (chunk_size)) {
+      if (victim_queue->head < tail_snapshot - chunk_size - GUARD) {
         if (atomicCAS(&(victim_queue->tail), tail_snapshot, tail_snapshot - chunk_size) != tail_snapshot) {
           // Another block beat us to stealing from this victim; try next.
           continue;
