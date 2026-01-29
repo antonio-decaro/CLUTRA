@@ -129,9 +129,9 @@ struct BasicStealerDevice : StealerDevice {
    * @brief Shared state for BasicStealerDevice (victim info + cluster queues).
    */
   struct SharedState : StealerDevice::SharedState<BlockSize> {
-    uint32_t victim_rank;
-    uint32_t steal_count;
-    uint32_t steal_tail;
+    int16_t victim_rank;
+    int16_t steal_count;
+    int16_t steal_tail;
     clutra::detail::utils::SharedQueue<BlockSize>* cluster_queues[8];
   };
 
