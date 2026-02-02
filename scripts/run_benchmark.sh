@@ -4,12 +4,13 @@
 SCRIPT_DIR="$1"
 shift
 
+BENCHMARKS="measure_imbalance,triangle_counting"
 dataset_folder=""
 dataset_list=""
 enable_stealing=""
 out_dir=""
-num_runs=20
 benchmark="measure_imbalance"
+num_runs=20
 declare -A dataset_sources
 
 function print_usage {
@@ -38,6 +39,12 @@ do
         exit 1;;
   esac
 done
+
+if [[ ! ",$BENCHMARKS," =~ ",$benchmark," ]]; then
+  echo "Unknown benchmark: $benchmark"
+  print_usage
+  exit 1
+fi
 
 if [ -z "$out_dir" ]
 then
@@ -110,13 +117,13 @@ do
         continue
       fi
       echo "  Source: $source"
-      $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $enable_stealing -s "$source" >> "$out_dir/${dataset_basename}.out"
+      $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $enable_stealing -s "$source" >> "$out_dir/${dataset_basename}.out" 2>&1
     done
   else
     for ((run=1; run<=num_runs; run++))
     do
       echo "  Run $run/$num_runs"
-      $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $enable_stealing >> "$out_dir/${dataset_basename}.out"
+      $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $enable_stealing >> "$out_dir/${dataset_basename}.out" 2>&1
     done
   fi
 done
