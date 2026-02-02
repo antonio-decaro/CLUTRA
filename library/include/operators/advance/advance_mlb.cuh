@@ -120,7 +120,9 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   for (size_t iter = 0; iter < total_iters; ++iter) { // TODO change with stealing with ptx 
     const uint32_t tile_gid = static_cast<uint32_t>(blockIdx.x + (iter * gridDim.x));
 
+    __syncthreads();
     if (tid == 0)  {
+      stealer.setReady(stealer_state, false);
       cta_queue.init();
     }
     if (lane == 0) {
@@ -143,6 +145,9 @@ __global__ void advanceKernel(GraphDevT graph_dev,
     }
 
     __syncthreads();
+    if (tid == 0) {
+      stealer.setReady(stealer_state, true);
+    }
 
     uint32_t vertex, degree;
     while (cta_queue.pop(vertex, degree)) {
@@ -173,7 +178,7 @@ __global__ void advanceKernel(GraphDevT graph_dev,
         steal_degree,
         tid,
         block_dim);
-    }
+      }
     __syncthreads();
   }
 

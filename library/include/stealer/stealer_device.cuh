@@ -81,6 +81,15 @@ struct StealerDevice {
    * @brief Finalize stealing for the block (e.g., cluster sync).
    */
   __device__ void finalize() const;
+
+  template <size_t BlockSize>
+  /**
+   * @brief Set local readiness for stealing (victims advertise readiness).
+   * @param state Pointer to the stealer shared state.
+   * @param ready True when this block's queue is initialized and ready.
+   */
+  __device__ void setReady(SharedState<BlockSize>&,
+                           bool) const;
 };
 
 struct NullStealerDevice : StealerDevice {
@@ -120,6 +129,13 @@ struct NullStealerDevice : StealerDevice {
    * @brief No-op finalize for NullStealerDevice.
    */
   __device__ void finalize() const {}
+
+  template <size_t BlockSize>
+  /**
+   * @brief No-op ready setter for NullStealerDevice.
+   */
+  __device__ void setReady(SharedState<BlockSize>& state,
+                           bool ready) const {}
 };
 
 struct BasicStealerDevice : StealerDevice {
@@ -132,6 +148,10 @@ struct BasicStealerDevice : StealerDevice {
     int16_t victim_rank;
     int16_t steal_count;
     int16_t steal_tail;
+    bool is_finished;
+    int is_ready;
+    bool* is_finished_ptr[8];
+    int* is_ready_ptr[8];
     clutra::detail::utils::SharedQueue<BlockSize>* cluster_queues[8];
   };
 
@@ -164,6 +184,15 @@ struct BasicStealerDevice : StealerDevice {
    * @brief Finalize stealing for the block (e.g., cluster sync).
    */
   __device__ void finalize() const;
+
+  template <size_t BlockSize>
+  /**
+   * @brief Set local readiness for stealing.
+   * @param state Pointer to the stealer shared state.
+   * @param ready True when this block's queue is initialized and ready.
+   */
+  __device__ void setReady(SharedState<BlockSize>& state,
+                           bool ready) const;
 };
 
 } // namespace clutra::stealer

@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cuda_runtime.h>
+#include <cuda/atomic>
 #include <cstdint>
 
 namespace clutra::detail::utils {
@@ -31,7 +32,10 @@ struct SharedQueue {
   }
 
   __forceinline__ __device__ bool pop(uint32_t& vertex, uint32_t& degree) {
-    if (head < 0 || head >= tail) {
+    cuda::atomic_ref<int, cuda::thread_scope_device> tail_ref(tail);
+    const int tail_snapshot = tail_ref.load(cuda::memory_order_relaxed);
+
+    if (head < 0 || head >= tail_snapshot) {
       return false; // empty
     }
     
