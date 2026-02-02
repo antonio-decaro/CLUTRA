@@ -39,7 +39,7 @@ bool validate(const GraphT& graph, const int* device_distances, const uint sourc
     out_frontier.clear();
     iter++;
   }
-  if (mismatches) { std::cerr << "Mismatches: " << mismatches << std::endl; }
+  if (mismatches) { std::cout << "Mismatches: " << mismatches << std::endl; }
   return mismatches == 0;
 }
 
