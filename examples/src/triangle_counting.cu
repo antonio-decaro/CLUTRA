@@ -4,8 +4,68 @@
 #include <thrust/device_vector.h>
 #include <iostream>
 
-// Prevents the compiler from optimizing away synthetic work in the BFS kernel.
-__device__ unsigned long long g_work_sink = 0;
+template <typename DeviceGraphT>
+struct MergePathsFunctor {
+  DeviceGraphT graph_dev;
+  int* edges;
+
+  template <typename U, typename V, typename E, typename W>
+  __device__ bool operator()(U u, V v, E e, W w) const {
+    auto src_it = graph_dev.begin(u);
+    auto src_end = graph_dev.end(u);
+    auto dst_it = graph_dev.begin(v);
+    auto dst_end = graph_dev.end(v);
+    while (src_it != src_end && dst_it != dst_end) {
+      if (*src_it == *dst_it) {
+        // Found a common neighbor
+        edges[blockIdx.x * blockDim.x + threadIdx.x] += 1;
+        ++src_it;
+        ++dst_it;
+      } else if (*src_it < *dst_it) {
+        ++src_it;
+      } else {
+        ++dst_it;
+      }
+    }
+    return false;
+  }
+};
+
+template <typename DeviceGraphT>
+struct BinarySearchFunctor {
+  DeviceGraphT graph_dev;
+  int* edges;
+
+  template <typename U, typename V, typename E, typename W>
+  __device__ bool operator()(U u, V v, E e, W w) const {
+    auto src_start = graph_dev.getFirstNeighbor(u);
+    auto dst_start = graph_dev.getFirstNeighbor(v);
+    auto src_deg = graph_dev.getDegree(u);
+    auto dst_deg = graph_dev.getDegree(v);
+
+    for (size_t i = 0; i < src_deg; ++i) {
+      auto src_neighbor = graph_dev.getColumnIndices()[src_start + i];
+      // Binary search in dst's neighbors
+      size_t left = 0;
+      size_t right = dst_deg;
+      while (left < right) {
+        size_t mid = left + (right - left) / 2;
+        auto dst_neighbor = graph_dev.getColumnIndices()[dst_start + mid];
+        if (dst_neighbor == src_neighbor) {
+          // Found a common neighbor
+          edges[threadIdx.x + blockIdx.x * blockDim.x] += 1;
+          break;
+        } else if (dst_neighbor < src_neighbor) {
+          left = mid + 1;
+        } else {
+          right = mid;
+        }
+      }
+    }
+    return false;
+  }
+};
+
 
 template<typename GraphT>
 size_t validate(const GraphT& graph) {
@@ -96,6 +156,12 @@ int main(int argc, char** argv) {
   Options opts;
   CLI::App app{"CLUTRA Triangle Counting (TC)"};
   auto cli_handles = configureBaseCLI(app, opts);
+  std::string tc_method = "merge";
+  app.add_option(
+      "--method",
+      tc_method,
+      "Triangle counting method: merge or binary (default: merge)")
+      ->check(CLI::IsMember({"merge", "binary"}));
   CLI11_PARSE(app, argc, argv);
   finalizeGraphOptions(opts, cli_handles);
 
@@ -123,29 +189,12 @@ int main(int argc, char** argv) {
   cudaMalloc(&edges, sizeof(int) * thread_count);
   cudaMemset(edges, 0, sizeof(int) * thread_count);
   
-  std::cout << "[*] Running TC" << std::endl;
-  clutra::operators::advance::graph(graph, stealer, 
-    [=] __device__ (auto u, auto v, auto e, auto w) {
-      // for (int i = 0; i < 1000; i++) {
-        auto src_it = graph_dev.begin(u);
-        auto src_end = graph_dev.end(u);
-        auto dst_it = graph_dev.begin(v);
-        auto dst_end = graph_dev.end(v);
-        while (src_it != src_end && dst_it != dst_end) {
-          if (*src_it == *dst_it) {
-            // Found a common neighbor
-            edges[threadIdx.x + blockIdx.x * blockDim.x] += 1;
-            ++src_it;
-            ++dst_it;
-          } else if (*src_it < *dst_it) {
-            ++src_it;
-          } else {
-            ++dst_it;
-          }
-        }
-      // }
-      return false;
-  });
+  std::cout << "[*] Running TC with method: " << tc_method << std::endl;
+  if (tc_method == "binary") {
+    clutra::operators::advance::graph(graph, stealer, BinarySearchFunctor{graph_dev, edges});
+  } else {
+    clutra::operators::advance::graph(graph, stealer, MergePathsFunctor{graph_dev, edges});
+  }
   
   clutra::profile::KernelProfiler profiler("reduce_triangles");
   std::uint64_t device_triangles = thrust::reduce(thrust::device_ptr<int>(edges), thrust::device_ptr<int>(edges + thread_count), 0LL);
