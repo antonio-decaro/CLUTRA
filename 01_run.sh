@@ -1,8 +1,21 @@
 #!/usr/bin/env bash
+#SBATCH --account=hpc_default
+#SBATCH --job-name=triangle_counting_benchmark
+#SBATCH --output=triangle_counting_benchmark.out
+#SBATCH --error=triangle_counting_benchmark.err
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --requeue
+#SBATCH --cpus-per-task=1
+#SBATCH --time=06:59:00
+#SBATCH --qos=normal
+#SBATCH --partition=aiq
+#SBATCH --gres=gpu:1
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR=/home/dcrntn002/CLUTRA
+# SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-dataset_folder=""
+dataset_folder="/home/dcrntn002/datasets"
 
 while getopts :hsf: flag
 do
@@ -29,6 +42,7 @@ indochina-2004:56926,86450,148030,154316,155498,176597,182178,291167,328383,3596
 soc-LiveJournal1:47,171,321,507,732,1001,1305,1612,1943,2263,2583,2912,3243,3571,3899,4227,4556,4885,5214,5543;\
 "
 # soc-twitter-2010:1138,1535,2316,4326,6573,10395,13713,17612,20125,23378,26350,29761,32912,36645,39827,42813,46226,49187,52310,56726;\
+DATASET="hollywood-2009;soc-orkut;indochina-2004;soc-LiveJournal1;soc-twitter-2010;roadNet-CA;road_usa;kron_g500-logn21"
 
 function print_usage {
   echo "Usage: $0 <benchmark> [args...]"
@@ -45,6 +59,14 @@ benchmark="$1"
 shift
 
 case "$benchmark" in
+  *tc)
+    target_script="$SCRIPT_DIR/scripts/run_benchmark.sh"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/1c -f $dataset_folder -n 20 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/2c -f $dataset_folder -n 20 -S 2 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/4c -f $dataset_folder -n 20 -S 4 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/8c -f $dataset_folder -n 20 -S 8 -d $DATASET -b triangle_counting "$@"
+    exit $?
+    ;;
   *imbalance)
     target_script="$SCRIPT_DIR/scripts/run_benchmark.sh"
     bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/imbalance/no-stealing/ $MEASURE_IMBALANCE_ARGS "$@"

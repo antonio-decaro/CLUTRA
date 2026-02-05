@@ -23,7 +23,7 @@ function print_usage {
   echo "  -h    Show this help message"
 }
 
-while getopts :hsd:f:n:o:b: flag
+while getopts :hsd:f:n:o:b:S: flag
 do
   case "${flag}" in
     f) dataset_folder=${OPTARG};;
@@ -32,6 +32,7 @@ do
     d) dataset_list=${OPTARG};;
     b) benchmark=${OPTARG};;
     s) enable_stealing="-t";;
+    S) enable_stealing="-t -c ${OPTARG}";;
     n) num_runs=${OPTARG};;
     o) out_dir=${OPTARG};;
     \?) echo "Invalid option: -${OPTARG}" >&2
