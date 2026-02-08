@@ -118,13 +118,13 @@ do
         continue
       fi
       echo "  Source: $source"
-      $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $enable_stealing -s "$source" >> "$out_dir/${dataset_basename}.out" 2>&1
+      $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" --method merge $enable_stealing -s "$source" >> "$out_dir/${dataset_basename}.out" 2>&1
     done
   else
     for ((run=1; run<=num_runs; run++))
     do
       echo "  Run $run/$num_runs"
-      $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $enable_stealing >> "$out_dir/${dataset_basename}.out" 2>&1
+      $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" --method merge $enable_stealing >> "$out_dir/${dataset_basename}.out" 2>&1
     done
   fi
 done

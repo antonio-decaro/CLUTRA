@@ -189,4 +189,101 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   stealer.template finalize<BlockSize>();
 }
 
+__device__ uint32_t getAssignedEdge(uint32_t tile_gid, uint32_t tid) {
+  return static_cast<uint32_t>(tile_gid) * blockDim.x + tid;
+}
+
+template<size_t BlockSize, graph::detail::DeviceGraphConcept GraphDevT, typename StealerDeviceT, typename LambdaT>
+__global__ void advanceKernel(GraphDevT graph_dev,
+                              size_t total_iters,
+                              StealerDeviceT stealer,
+                              LambdaT functor) {
+
+  constexpr int WARP_SIZE = 32;
+  static_assert(BlockSize % WARP_SIZE == 0, "BlockSize must be multiple of warp size");
+
+  __shared__ clutra::detail::utils::SharedQueue<BlockSize> cta_queue;
+  __shared__ clutra::detail::utils::SharedQueue<WARP_SIZE> warp_queues[BlockSize / WARP_SIZE];
+  __shared__ typename StealerDeviceT::template SharedState<BlockSize> stealer_state;
+
+  const int tid = threadIdx.x;
+  const int warp_id = tid >> 5;
+  const int lane = tid & (WARP_SIZE - 1);
+  const int block_dim = blockDim.x;
+  auto& warp_queue = warp_queues[warp_id];
+
+  if (stealer.isStealingEnabled()) { stealer.template init<BlockSize>(&cta_queue, stealer_state); }
+
+  for (size_t iter = 0; iter < total_iters; ++iter) { // TODO change with stealing with ptx 
+    const uint32_t tile_gid = static_cast<uint32_t>(blockIdx.x + (iter * gridDim.x));
+
+    __syncthreads();
+    if (tid == 0)  {
+      stealer.setReady(stealer_state, false);
+      cta_queue.init();
+    }
+    if (lane == 0) {
+      warp_queue.init();
+    }
+
+    __syncthreads();
+
+    const uint32_t edge_index = getAssignedEdge(tile_gid, tid);
+    if (edge_index < graph_dev.getEdgeCount()) {
+      const auto weight = graph_dev.getEdgeWeight(edge_index);
+      const auto src = graph_dev.getSourceVertex(edge_index);
+      const auto dst = graph_dev.getDestinationVertex(edge_index);
+      size_t tot_degree = graph_dev.getDegree(src) + graph_dev.getDegree(dst);
+      size_t cta_threshold = block_dim;
+      if (tot_degree >= cta_threshold) {
+        cta_queue.push(edge_index, tot_degree);
+      } else {
+        warp_queue.push(edge_index, tot_degree);
+      }
+    }
+
+    __syncthreads();
+
+    if (tid == 0) {
+      stealer.setReady(stealer_state, true);
+    }
+
+
+    uint32_t edge, degree;
+    while (cta_queue.pop(edge, degree)) {
+      const auto weight = graph_dev.getEdgeWeight(edge);
+      const auto src = graph_dev.getSourceVertex(edge);
+      const auto dst = graph_dev.getDestinationVertex(edge);
+      functor(src, dst, edge, weight);
+    }
+
+    for (int i = tid; i < warp_queue.size(); ++i) {
+      const uint32_t edge = warp_queue.vertices[i];
+      const auto weight = graph_dev.getEdgeWeight(edge);
+      const auto src = graph_dev.getSourceVertex(edge);
+      const auto dst = graph_dev.getDestinationVertex(edge);
+      functor(src, dst, edge, weight);
+    }
+  }
+
+  if (!stealer.isStealingEnabled()) { return ; }
+
+  while (true) {
+    const int steal_count = stealer.template attemptStealing<BlockSize>(stealer_state, stealer.getStealingChunkSize());
+    if (steal_count == 0) {
+      break;
+    }
+    uint32_t steal_edge = 0;
+    uint32_t steal_degree = 0;
+    for (int i = 0; i < steal_count; ++i) {
+      stealer.template steal<BlockSize>(stealer_state, i, steal_edge, steal_degree);
+      const auto weight = graph_dev.getEdgeWeight(steal_edge);
+      const auto src = graph_dev.getSourceVertex(steal_edge);
+      const auto dst = graph_dev.getDestinationVertex(steal_edge);
+      functor(src, dst, steal_edge, weight);
+    }
+    __syncthreads();
+  }
+}
+
 } // namespace clutra::operators::advance::detail

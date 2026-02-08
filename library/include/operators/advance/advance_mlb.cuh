@@ -180,4 +180,55 @@ void launchKernel(const GraphT& graph,
   CUDA_CHECK(cudaDeviceSynchronize());
   profiler.stop();
 }
+
+/**
+ * Launch edge-based advance kernel (i.e., all edges are processed).
+ */
+template<clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename DeviceStealerT, typename LambdaT>
+void launchEdgeKernel(const GraphT& graph,
+                      const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer,
+                      LambdaT&& functor) {
+  constexpr size_t CU_SIZE = 512;
+  auto graph_dev = graph.getDeviceGraph();
+
+  const size_t edge_count = graph.getEdgeCount();
+
+  const size_t block_size = CU_SIZE;
+  const size_t work_tiles = (edge_count + block_size - 1) / block_size;
+  int device_id = 0;
+  CUDA_CHECK(cudaGetDevice(&device_id));
+
+  const size_t smem = getAdvanceSharedMemorySize<CU_SIZE>(stealer.template getSharedStateSizeInBytes<CU_SIZE>());
+  const size_t grid_size = clutra::detail::device::getMaxOccupancyGridSize(device_id,
+                                                  block_size,
+                                                  smem,
+                                                  advanceKernel<CU_SIZE, decltype(graph_dev), decltype(stealer.getDeviceStealer()), LambdaT>);
+  const size_t cluster_size = stealer.getPreferredClusterSize();
+  auto launch_config = clutra::detail::kernels::adjustLaunchConfig(grid_size, block_size, cluster_size, work_tiles, stealer);
+
+  const size_t total_iters = (work_tiles + launch_config.grid_size - 1) / launch_config.grid_size;
+
+  clutra::detail::log("Advance Edge Operator Launch - Edge Count: {}, Grid Size: {} (was {}), Block Size: {}, Cluster Size: {}, SMEM: {}, Stealing Enabled: {}",
+                   edge_count,
+                   launch_config.grid_size,
+                   grid_size,
+                   launch_config.block_size,
+                   launch_config.cluster_size,
+                   smem,
+                   stealer.isIntraClusterStealingEnabled() ? "Yes" : "No");
+
+  clutra::profile::KernelProfiler profiler("advanceKernelEdge", "core");
+
+  auto stealer_dev = stealer.getDeviceStealer();
+  auto& kernel_launch_function = detail::advanceKernel<CU_SIZE, decltype(graph_dev), decltype(stealer_dev), LambdaT>;
+  clutra::detail::kernels::launchClusterKernel(launch_config,
+                                               kernel_launch_function,
+                                               graph_dev,
+                                               total_iters,
+                                               stealer_dev,
+                                               std::forward<LambdaT>(functor));
+
+  CUDA_CHECK(cudaDeviceSynchronize());
+  profiler.stop();
+}
 } // namespace clutra::operators::advance::detail

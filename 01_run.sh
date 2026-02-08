@@ -40,9 +40,10 @@ hollywood-2009:1564,11421,31922,38428,42013,55662,74822,85126,116695,121253,1389
 soc-orkut:2530,86966,96659,105537,111516,114017,146757,155403,168592,212213,217626,253758,268665,283564,284286,301658,302210,305642,320816,332954;\
 indochina-2004:56926,86450,148030,154316,155498,176597,182178,291167,328383,359632,369983,504618,579022,581598,587827,601202,604611,613033,615223,804644;\
 soc-LiveJournal1:47,171,321,507,732,1001,1305,1612,1943,2263,2583,2912,3243,3571,3899,4227,4556,4885,5214,5543;\
+soc-twitter-2010:1138,1535,2316,4326,6573,10395,13713,17612,20125,23378,26350,29761,32912,36645,39827,42813,46226,49187,52310,56726;\
 "
-# soc-twitter-2010:1138,1535,2316,4326,6573,10395,13713,17612,20125,23378,26350,29761,32912,36645,39827,42813,46226,49187,52310,56726;\
-DATASET="hollywood-2009;soc-orkut;indochina-2004;soc-LiveJournal1;soc-twitter-2010;roadNet-CA;road_usa;kron_g500-logn21"
+# DATASET="hollywood-2009;soc-orkut;indochina-2004;soc-LiveJournal1;soc-twitter-2010;roadNet-CA;road_usa;kron_g500-logn21;com-friendster;uk-2002;uk-2005;europe_osm;it-2004;webbase-2001;sk-2005"
+DATASET="uk-2002;uk-2005;europe_osm;it-2004;webbase-2001;sk-2005"
 
 function print_usage {
   echo "Usage: $0 <benchmark> [args...]"
@@ -61,10 +62,10 @@ shift
 case "$benchmark" in
   *tc)
     target_script="$SCRIPT_DIR/scripts/run_benchmark.sh"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/1c -f $dataset_folder -n 20 -d $DATASET -b triangle_counting "$@"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/2c -f $dataset_folder -n 20 -S 2 -d $DATASET -b triangle_counting "$@"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/4c -f $dataset_folder -n 20 -S 4 -d $DATASET -b triangle_counting "$@"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/8c -f $dataset_folder -n 20 -S 8 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/1c -f $dataset_folder -n 10 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/2c -f $dataset_folder -n 10 -S 2 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/4c -f $dataset_folder -n 10 -S 4 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/8c -f $dataset_folder -n 10 -S 8 -d $DATASET -b triangle_counting "$@"
     exit $?
     ;;
   *imbalance)

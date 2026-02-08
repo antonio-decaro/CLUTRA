@@ -100,4 +100,21 @@ void graph(const GraphT& graph, LambdaT&& functor) {
   detail::launchKernel<detail::advance_direction::push>(graph, nullptr, clutra::stealer::NullStealer{}, std::forward<LambdaT>(functor));
 }
 
+/**
+ * @brief Edge-based advance operator (processes all edges).
+ * @param graph The input graph.
+ * @param stealer The stealer configuration for load balancing.
+ * @param functor The user-defined functor to apply to each edge.
+ */
+template<clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename DeviceStealerT, typename LambdaT>
+void edges(const GraphT& graph, const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer, LambdaT&& functor) {
+  detail::launchEdgeKernel(graph, stealer, std::forward<LambdaT>(functor));
+}
+
+// Overload for edge-based advance without stealer (uses NullStealer).
+template<clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
+void edges(const GraphT& graph, LambdaT&& functor) {
+  detail::launchEdgeKernel(graph, clutra::stealer::NullStealer{}, std::forward<LambdaT>(functor));
+}
+
 }// namespace clutra::operators::advance

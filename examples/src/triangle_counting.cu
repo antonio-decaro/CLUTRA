@@ -43,22 +43,52 @@ struct BinarySearchFunctor {
     auto src_deg = graph_dev.getDegree(u);
     auto dst_deg = graph_dev.getDegree(v);
 
-    for (size_t i = 0; i < src_deg; ++i) {
-      auto src_neighbor = graph_dev.getColumnIndices()[src_start + i];
-      // Binary search in dst's neighbors
-      size_t left = 0;
-      size_t right = dst_deg;
-      while (left < right) {
-        size_t mid = left + (right - left) / 2;
-        auto dst_neighbor = graph_dev.getColumnIndices()[dst_start + mid];
-        if (dst_neighbor == src_neighbor) {
-          // Found a common neighbor
+    // Ensure |A| <= |B|
+    auto a_start = src_start;
+    auto a_deg = src_deg;
+    auto b_start = dst_start;
+    auto b_deg = dst_deg;
+    if (src_deg > dst_deg) {
+      a_start = dst_start;
+      a_deg = dst_deg;
+      b_start = src_start;
+      b_deg = src_deg;
+    }
+
+    auto col_indices = graph_dev.getColumnIndices();
+    for (int i = 0; i < a_deg; ++i) {
+      auto x = col_indices[a_start + i];
+      if (b_deg == 0) {
+        continue;
+      }
+      if (b_deg == 1) {
+        if (x == col_indices[b_start]) {
           edges[threadIdx.x + blockIdx.x * blockDim.x] += 1;
+        }
+        continue;
+      }
+
+      int bottom = 0;
+      int top = b_deg - 1;
+      bool found = false;
+      while (bottom + 1 < top) {
+        int mid = (top + bottom) >> 1;
+        auto y = col_indices[b_start + mid];
+        if (x < y) {
+          top = mid;
+        } else if (x > y) {
+          bottom = mid;
+        } else {  // x == y
+          edges[threadIdx.x + blockIdx.x * blockDim.x] += 1;
+          found = true;
           break;
-        } else if (dst_neighbor < src_neighbor) {
-          left = mid + 1;
-        } else {
-          right = mid;
+        }
+      }
+
+      if (!found) {
+        if (x == col_indices[b_start + bottom] ||
+            x == col_indices[b_start + top]) {
+          edges[threadIdx.x + blockIdx.x * blockDim.x] += 1;
         }
       }
     }
