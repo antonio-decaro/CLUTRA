@@ -17,7 +17,7 @@ template <typename DeviceGraphT> struct MergePathsFunctor {
     while (src_it != src_end && dst_it != dst_end) {
       if (*src_it == *dst_it) {
         // Found a common neighbor
-        edges[blockIdx.x * blockDim.x + threadIdx.x] += 1;
+        atomicAdd(&edges[u], 1);
         ++src_it;
         ++dst_it;
       } else if (*src_it < *dst_it) {
@@ -61,7 +61,7 @@ template <typename DeviceGraphT> struct BinarySearchFunctor {
       }
       if (b_deg == 1) {
         if (x == col_indices[b_start]) {
-          edges[threadIdx.x + (blockIdx.x * blockDim.x)] += 1;
+          atomicAdd(&edges[u], 1);
         }
         continue;
       }
@@ -211,8 +211,8 @@ int main(int argc, char **argv) {
 
   const size_t thread_count = 264 * 512 * 32;
   int *edges;
-  cudaMalloc(&edges, sizeof(int) * thread_count);
-  cudaMemset(edges, 0, sizeof(int) * thread_count);
+  cudaMalloc(&edges, sizeof(int) * graph.getVertexCount());
+  cudaMemset(edges, 0, sizeof(int) * graph.getVertexCount());
 
   std::cout << "[*] Running TC with method: " << tc_method << std::endl;
   if (tc_method == "binary") {
@@ -224,9 +224,9 @@ int main(int argc, char **argv) {
   }
 
   clutra::profile::KernelProfiler profiler("reduce_triangles");
-  std::uint64_t device_triangles =
-      thrust::reduce(thrust::device_ptr<int>(edges),
-                     thrust::device_ptr<int>(edges + thread_count), 0LL);
+  std::uint64_t device_triangles = thrust::reduce(
+      thrust::device_ptr<int>(edges),
+      thrust::device_ptr<int>(edges + graph.getVertexCount()), 0LL);
   device_triangles /= 3; // Each triangle is counted three times
   profiler.stop();
 
