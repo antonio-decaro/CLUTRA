@@ -1,13 +1,12 @@
-#include <clutra.hpp>
 #include "utils.hpp"
+#include <clutra.hpp>
 #include <cstdint>
-#include <thrust/device_vector.h>
 #include <iostream>
+#include <thrust/device_vector.h>
 
-template <typename DeviceGraphT>
-struct MergePathsFunctor {
+template <typename DeviceGraphT> struct MergePathsFunctor {
   DeviceGraphT graph_dev;
-  int* edges;
+  int *edges;
 
   template <typename U, typename V, typename E, typename W>
   __device__ bool operator()(U u, V v, E e, W w) const {
@@ -31,10 +30,9 @@ struct MergePathsFunctor {
   }
 };
 
-template <typename DeviceGraphT>
-struct BinarySearchFunctor {
+template <typename DeviceGraphT> struct BinarySearchFunctor {
   DeviceGraphT graph_dev;
-  int* edges;
+  int *edges;
 
   template <typename U, typename V, typename E, typename W>
   __device__ bool operator()(U u, V v, E e, W w) const {
@@ -63,7 +61,7 @@ struct BinarySearchFunctor {
       }
       if (b_deg == 1) {
         if (x == col_indices[b_start]) {
-          edges[threadIdx.x + blockIdx.x * blockDim.x] += 1;
+          edges[threadIdx.x + (blockIdx.x * blockDim.x)] += 1;
         }
         continue;
       }
@@ -78,8 +76,8 @@ struct BinarySearchFunctor {
           top = mid;
         } else if (x > y) {
           bottom = mid;
-        } else {  // x == y
-          edges[threadIdx.x + blockIdx.x * blockDim.x] += 1;
+        } else { // x == y
+          edges[threadIdx.x + (blockIdx.x * blockDim.x)] += 1;
           found = true;
           break;
         }
@@ -88,7 +86,7 @@ struct BinarySearchFunctor {
       if (!found) {
         if (x == col_indices[b_start + bottom] ||
             x == col_indices[b_start + top]) {
-          edges[threadIdx.x + blockIdx.x * blockDim.x] += 1;
+          edges[threadIdx.x + (blockIdx.x * blockDim.x)] += 1;
         }
       }
     }
@@ -96,11 +94,9 @@ struct BinarySearchFunctor {
   }
 };
 
-
-template<typename GraphT>
-size_t validate(const GraphT& graph) {
-  const auto* row_offsets = graph.getRowOffsets();
-  const auto* col_indices = graph.getColumnIndices();
+template <typename GraphT> size_t validate(const GraphT &graph) {
+  const auto *row_offsets = graph.getRowOffsets();
+  const auto *col_indices = graph.getColumnIndices();
 
   const size_t vertex_count = graph.getVertexCount();
   std::uint64_t cpu_triangles = 0;
@@ -133,9 +129,10 @@ size_t validate(const GraphT& graph) {
   return cpu_triangles / 3; // Each triangle is counted three times
 }
 
-bool checkOrderedCSR(const clutra::formats::CSR<float, uint32_t, uint32_t>& csr) {
-  const auto& row_offsets = csr.getRowOffsets();
-  const auto& col_indices = csr.getColumnIndices();
+bool checkOrderedCSR(
+    const clutra::formats::CSR<float, uint32_t, uint32_t> &csr) {
+  const auto &row_offsets = csr.getRowOffsets();
+  const auto &col_indices = csr.getColumnIndices();
 
   const size_t vertex_count = row_offsets.size() - 1;
 
@@ -151,10 +148,10 @@ bool checkOrderedCSR(const clutra::formats::CSR<float, uint32_t, uint32_t>& csr)
   return true;
 }
 
-void sortCSR(clutra::formats::CSR<float, uint32_t, uint32_t>& csr) {
-  const auto& row_offsets = csr.getRowOffsets();
-  auto& col_indices = csr.getColumnIndices();
-  auto& values = csr.getValues();
+void sortCSR(clutra::formats::CSR<float, uint32_t, uint32_t> &csr) {
+  const auto &row_offsets = csr.getRowOffsets();
+  auto &col_indices = csr.getColumnIndices();
+  auto &values = csr.getValues();
 
   const size_t vertex_count = row_offsets.size() - 1;
 
@@ -169,10 +166,10 @@ void sortCSR(clutra::formats::CSR<float, uint32_t, uint32_t>& csr) {
     }
 
     // Sort the neighbors based on col_index
-    std::sort(neighbors.begin(), neighbors.end(),
-              [](const std::pair<uint32_t, float>& a, const std::pair<uint32_t, float>& b) {
-                return a.first < b.first;
-              });
+    std::sort(
+        neighbors.begin(), neighbors.end(),
+        [](const std::pair<uint32_t, float> &a,
+           const std::pair<uint32_t, float> &b) { return a.first < b.first; });
 
     // Write back the sorted neighbors
     for (size_t idx = start; idx < end; ++idx) {
@@ -182,15 +179,13 @@ void sortCSR(clutra::formats::CSR<float, uint32_t, uint32_t>& csr) {
   }
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
   Options opts;
   CLI::App app{"CLUTRA Triangle Counting (TC)"};
   auto cli_handles = configureBaseCLI(app, opts);
   std::string tc_method = "merge";
-  app.add_option(
-      "--method",
-      tc_method,
-      "Triangle counting method: merge or binary (default: merge)")
+  app.add_option("--method", tc_method,
+                 "Triangle counting method: merge or binary (default: merge)")
       ->check(CLI::IsMember({"merge", "binary"}));
   CLI11_PARSE(app, argc, argv);
   finalizeGraphOptions(opts, cli_handles);
@@ -199,7 +194,7 @@ int main(int argc, char** argv) {
   clutra::graph::Properties properties;
   auto csr = readCSR<float, uint32_t, uint32_t>(opts, &properties);
   std::cerr << "[*] Checking CSR is ordered" << std::endl;
-  if(!checkOrderedCSR(csr)){
+  if (!checkOrderedCSR(csr)) {
     std::cerr << "[*] CSR not ordered. Sorting..." << std::endl;
     sortCSR(csr);
   }
@@ -208,32 +203,35 @@ int main(int argc, char** argv) {
   auto graph = clutra::graph::createGraph(csr, properties);
   printGraphInfo(graph);
   printStealingOptions(opts, false);
-  
+
   auto stealer_config = getStealingConfig(opts);
   clutra::stealer::BasicStealer stealer(stealer_config);
 
   auto graph_dev = graph.getDeviceGraph();
 
   const size_t thread_count = 264 * 512 * 32;
-  int* edges;
+  int *edges;
   cudaMalloc(&edges, sizeof(int) * thread_count);
   cudaMemset(edges, 0, sizeof(int) * thread_count);
-  
+
   std::cout << "[*] Running TC with method: " << tc_method << std::endl;
   if (tc_method == "binary") {
-    clutra::operators::advance::graph(graph, stealer, BinarySearchFunctor{graph_dev, edges});
+    clutra::operators::advance::graph(graph, stealer,
+                                      BinarySearchFunctor{graph_dev, edges});
   } else {
-    clutra::operators::advance::graph(graph, stealer, MergePathsFunctor{graph_dev, edges});
+    clutra::operators::advance::graph(graph, stealer,
+                                      MergePathsFunctor{graph_dev, edges});
   }
-  
+
   clutra::profile::KernelProfiler profiler("reduce_triangles");
-  std::uint64_t device_triangles = thrust::reduce(thrust::device_ptr<int>(edges), thrust::device_ptr<int>(edges + thread_count), 0LL);
+  std::uint64_t device_triangles =
+      thrust::reduce(thrust::device_ptr<int>(edges),
+                     thrust::device_ptr<int>(edges + thread_count), 0LL);
   device_triangles /= 3; // Each triangle is counted three times
   profiler.stop();
-  
+
   std::cout << "[*] TC completed" << std::endl;
   std::cout << "[*] Triangles: " << device_triangles << std::endl;
-
 
   if (opts.validate) {
     std::cout << "Validation: [";
@@ -241,24 +239,22 @@ int main(int argc, char** argv) {
     auto validation_result = validate(graph);
     if (validation_result != device_triangles) {
       std::cout << failString();
-      std::cout << " (CPU: " << validation_result << ", GPU: " << device_triangles << ")";
+      std::cout << " (CPU: " << validation_result
+                << ", GPU: " << device_triangles << ")";
     } else {
       std::cout << successString();
     }
     std::cout << "] | ";
     auto validation_end = std::chrono::high_resolution_clock::now();
-    std::cout << "Validation Time: " << std::chrono::duration_cast<std::chrono::milliseconds>(validation_end - validation_start).count() << " ms"
-              << std::endl;
+    std::cout << "Validation Time: "
+              << std::chrono::duration_cast<std::chrono::milliseconds>(
+                     validation_end - validation_start)
+                     .count()
+              << " ms" << std::endl;
   }
 
-  // for (int i = 0; i < thread_count; i++) {
-  //   if (edges[i] > 0) {
-  //     std::cout << "[" << i << "]" << edges[i] << " ";
-  //   }
-  // }
-  // std::cout << std::endl;
-  
   cudaFree(edges);
-  
-  clutra::profile::KernelProfilerManager::instance().printSummary(opts.profiling_detail);
+
+  clutra::profile::KernelProfilerManager::instance().printSummary(
+      opts.profiling_detail);
 }
