@@ -13,7 +13,7 @@ BinPackArguments: false
 BinPackParameters: false
 BreakBeforeBinaryOperators: All
 BreakBeforeBraces: Attach
-ColumnLimit: 150
+ColumnLimit: 200
 Cpp11BracedListStyle: true
 FixNamespaceComments: true
 IndentCaseLabels: true

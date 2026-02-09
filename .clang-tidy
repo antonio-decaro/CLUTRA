@@ -26,6 +26,8 @@ Checks: -*,
 
 CheckOptions:
   # Naming conventions
+  - ket: readability-identifier-naming.ConstexprVariableCase
+    value: UPPER_CASE
   - key: readability-identifier-naming.ClassCase
     value: CamelCase
   - key: readability-identifier-naming.ClassMethodCase

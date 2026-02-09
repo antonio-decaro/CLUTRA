@@ -209,7 +209,6 @@ int main(int argc, char **argv) {
 
   auto graph_dev = graph.getDeviceGraph();
 
-  const size_t thread_count = 264 * 512 * 32;
   int *edges;
   cudaMalloc(&edges, sizeof(int) * graph.getVertexCount());
   cudaMemset(edges, 0, sizeof(int) * graph.getVertexCount());

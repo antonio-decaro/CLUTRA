@@ -34,3 +34,5 @@ __pycache__/
 
 # Ignore clangd
 .clangd
+.clang
+.cache/**
