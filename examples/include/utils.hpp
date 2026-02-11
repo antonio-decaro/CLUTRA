@@ -194,3 +194,53 @@ inline std::string failString() {
   if (!isConsoleOutput()) { return "Failed"; }
   return "\033[1;31mFailed\033[0m";
 }
+
+bool checkOrderedCSR(
+    const clutra::formats::CSR<float, uint32_t, uint32_t> &csr) {
+  const auto &row_offsets = csr.getRowOffsets();
+  const auto &col_indices = csr.getColumnIndices();
+
+  const size_t vertex_count = row_offsets.size() - 1;
+
+  for (size_t u = 0; u < vertex_count; ++u) {
+    const auto start = row_offsets[u];
+    const auto end = row_offsets[u + 1];
+    for (size_t idx = start + 1; idx < end; ++idx) {
+      if (col_indices[idx - 1] >= col_indices[idx]) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+void sortCSR(clutra::formats::CSR<float, uint32_t, uint32_t> &csr) {
+  const auto &row_offsets = csr.getRowOffsets();
+  auto &col_indices = csr.getColumnIndices();
+  auto &values = csr.getValues();
+
+  const size_t vertex_count = row_offsets.size() - 1;
+
+  for (size_t u = 0; u < vertex_count; ++u) {
+    const auto start = row_offsets[u];
+    const auto end = row_offsets[u + 1];
+
+    // Create a vector of pairs (col_index, value)
+    std::vector<std::pair<uint32_t, float>> neighbors;
+    for (size_t idx = start; idx < end; ++idx) {
+      neighbors.emplace_back(col_indices[idx], values[idx]);
+    }
+
+    // Sort the neighbors based on col_index
+    std::sort(
+        neighbors.begin(), neighbors.end(),
+        [](const std::pair<uint32_t, float> &a,
+           const std::pair<uint32_t, float> &b) { return a.first < b.first; });
+
+    // Write back the sorted neighbors
+    for (size_t idx = start; idx < end; ++idx) {
+      col_indices[idx] = neighbors[idx - start].first;
+      values[idx] = neighbors[idx - start].second;
+    }
+  }
+}
