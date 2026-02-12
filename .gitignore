@@ -36,3 +36,6 @@ __pycache__/
 .clangd
 .clang
 .cache/**
+
+# Ignore random files
+ignore/**

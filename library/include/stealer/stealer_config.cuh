@@ -12,13 +12,16 @@ namespace clutra::stealer {
 /**
  * @brief Configuration for the Stealer component.
  * @details This structure holds configuration options for enabling or disabling
- * various stealing strategies such as thread stealing, block stealing, and grid stealing.
+ * various stealing strategies such as thread stealing, block stealing, and grid
+ * stealing.
  * @note This object should be device-compatible.
  */
 struct StealerConfig final {
   bool intra_cluster_stealing_enabled = false;
+  bool inter_cluster_stealing_enabled = false;
   int preferred_cluster_size = 4;
   int stealing_chunk_size = 16;
+  int global_stealing_chunk_size = 16;
 };
 
 static_assert(std::is_trivially_copyable_v<StealerConfig>,

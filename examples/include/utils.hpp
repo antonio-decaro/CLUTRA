@@ -25,7 +25,8 @@ struct Options {
   bool binary_format = false;
   bool matrix_market = false;
   bool undirected = false;
-  bool stealing = false;
+  bool local_stealing = false;
+  bool global_stealing = false;
   std::optional<int> stealing_chunk_size;
   bool random_source = true;
   std::string path;
@@ -36,6 +37,7 @@ struct Options {
 struct CLIHandles {
   CLI::Option* source_opt = nullptr;
   CLI::Option* stealing_opt = nullptr;
+  CLI::Option* global_stealing_opt = nullptr;
   CLI::Option* stealing_chunk_size_opt = nullptr;
   CLI::Option* cluster_size_opt = nullptr;
 };
@@ -55,14 +57,15 @@ inline CLIHandles configureBaseCLI(CLI::App& app, Options& opts) {
   app.add_flag("-u,--undirected", opts.undirected, "Treat input COO as an undirected graph");
   handles.cluster_size_opt = app.add_option("-c,--cluster-size", opts.cluster_size, "Set the cluster size for intra-cluster work stealing (default: 4)");
   handles.cluster_size_opt->check(CLI::Range(1, 8));
-  handles.stealing_opt = app.add_flag("-t,--stealing", opts.stealing, "Enable work stealing in the advance operator");
+  handles.stealing_opt = app.add_flag("-t,--stealing", opts.local_stealing, "Enable local (intra-cluster) work stealing in the advance operator");
+  handles.global_stealing_opt = app.add_flag("-g,--global-stealing", opts.global_stealing, "Enable global stealing (implies local + inter-cluster stealing)");
+  handles.stealing_opt->excludes(handles.global_stealing_opt);
+  handles.global_stealing_opt->excludes(handles.stealing_opt);
   handles.stealing_chunk_size_opt = app.add_option(
       "--chunk-size",
       opts.stealing_chunk_size,
-      "Set the stealing chunk size (requires stealing)");
+      "Set the stealing chunk size");
   handles.stealing_chunk_size_opt->check(CLI::PositiveNumber);
-  handles.stealing_chunk_size_opt->needs(handles.stealing_opt);
-  handles.cluster_size_opt->needs(handles.stealing_opt);
 
   handles.source_opt = app.add_option("-s,--source", opts.source, "Specify the source vertex");
   handles.source_opt->check(CLI::NonNegativeNumber);
@@ -78,18 +81,19 @@ inline void finalizeGraphOptions(Options& opts, const CLIHandles& handles) {
   } else {
     opts.random_source = true;
   }
-  if (handles.stealing_opt && handles.stealing_opt->count() > 0) {
-    opts.stealing = true;
-  } else {
-    opts.stealing = false;
-  }
+  opts.local_stealing =
+      (handles.stealing_opt && handles.stealing_opt->count() > 0);
+  opts.global_stealing =
+      (handles.global_stealing_opt && handles.global_stealing_opt->count() > 0);
 }
 
 inline clutra::stealer::StealerConfig getStealingConfig(const Options& opts) {
   clutra::stealer::StealerConfig config{};
-  config.intra_cluster_stealing_enabled = opts.stealing;
+  config.intra_cluster_stealing_enabled = opts.local_stealing || opts.global_stealing;
+  config.inter_cluster_stealing_enabled = opts.global_stealing;
   if (opts.stealing_chunk_size.has_value()) {
     config.stealing_chunk_size = *opts.stealing_chunk_size;
+    config.global_stealing_chunk_size = *opts.stealing_chunk_size;
   }
   config.preferred_cluster_size = opts.cluster_size;
   return config;
@@ -164,7 +168,9 @@ inline void printStealingOptions(const Options& opts, bool header = true, bool f
     std::cerr << "-----------------------------------" << std::endl;
   }
   std::cerr << std::left;
-  std::cerr << std::setw(26) << "Stealing enabled:" << std::setw(10) << (opts.stealing ? "yes" : "no") << std::endl;
+  const bool any_stealing = opts.local_stealing || opts.global_stealing;
+  std::cerr << std::setw(26) << "Stealing enabled:" << std::setw(10) << (any_stealing ? "yes" : "no") << std::endl;
+  std::cerr << std::setw(26) << "Global stealing:" << std::setw(10) << (opts.global_stealing ? "yes" : "no") << std::endl;
   std::cerr << std::setw(26) << "Stealing chunk size:" << std::setw(10)
             << (opts.stealing_chunk_size.has_value() ? std::to_string(*opts.stealing_chunk_size) : "default")
             << std::endl;
