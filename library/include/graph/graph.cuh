@@ -14,12 +14,13 @@ namespace clutra::graph {
 
 namespace detail {
 
-template<typename IndexT, typename OffsetT, typename ValueT>
+template <typename IndexT, typename OffsetT, typename ValueT>
 class GraphCSRDevice {
 public:
-  using vertex_t = IndexT; ///< The type used to represent vertices of the graph.
-  using edge_t = OffsetT;  ///< The type used to represent edges of the graph.
-  using weight_t = ValueT; ///< The type used to represent weights of the graph.
+  using vertex_t = IndexT;  ///< The type used to represent vertices of the graph.
+  using edge_t = OffsetT;   ///< The type used to represent edges of the graph.
+  using weight_t = ValueT;  ///< The type used to represent weights of the graph.
+
   struct NeighborIterator {
     __device__ NeighborIterator(IndexT* start_ptr, IndexT* ptr) : _start_ptr(start_ptr), _ptr(ptr) {}
 
@@ -108,16 +109,15 @@ public:
     return NeighborIterator(_column_indices, _column_indices + _row_offsets[vertex + 1]);
   }
 
-  IndexT _n_rows;      ///< The number of rows in the graph.
-  OffsetT _n_nonzeros; ///< The number of non-zero values in the graph.
+  IndexT _n_rows;       ///< The number of rows in the graph.
+  OffsetT _n_nonzeros;  ///< The number of non-zero values in the graph.
 
-  IndexT* _column_indices; ///< Pointer to the column indices of the graph.
-  OffsetT* _row_offsets;   ///< Pointer to the row offsets of the graph.
-  ValueT* _nnz_values;     ///< Pointer to the non-zero values of the graph.
+  IndexT* _column_indices;  ///< Pointer to the column indices of the graph.
+  OffsetT* _row_offsets;    ///< Pointer to the row offsets of the graph.
+  ValueT* _nnz_values;      ///< Pointer to the non-zero values of the graph.
 };
 
-} // namespace detail
-
+}  // namespace detail
 
 /**
  * @class graph_csr_t
@@ -126,12 +126,12 @@ public:
  * @tparam offset_t The type used to represent offsets of the graph.
  * @tparam value_t The type used to represent values of the graph.
  */
-template<typename IndexT, typename OffsetT, typename ValueT>
+template <typename IndexT, typename OffsetT, typename ValueT>
 class GraphCSR {
 public:
-  using vertex_t = IndexT; ///< The type used to represent vertices of the graph.
-  using edge_t = OffsetT;  ///< The type used to represent edges of the graph.
-  using weight_t = ValueT; ///< The type used to represent weights of the graph.
+  using vertex_t = IndexT;  ///< The type used to represent vertices of the graph.
+  using edge_t = OffsetT;   ///< The type used to represent edges of the graph.
+  using weight_t = ValueT;  ///< The type used to represent weights of the graph.
 
   /**
    * @brief Constructs a graph_csr_t object.
@@ -216,7 +216,6 @@ public:
    */
   const OffsetT* getRowOffsets() const { return _csr.getRowOffsets().data(); }
 
-
   /**
    * @brief Returns a constant pointer to the non-zero values of the graph.
    * @return A constant pointer to the non-zero values.
@@ -232,9 +231,9 @@ private:
   detail::GraphCSRDevice<IndexT, OffsetT, ValueT> _inverse_device_graph;
 };
 
-template<typename IndexT, typename OffsetT, typename ValueT>
+template <typename IndexT, typename OffsetT, typename ValueT>
 auto createGraph(clutra::formats::CSR<ValueT, IndexT, OffsetT>& csr, Properties properties) {
   return GraphCSR<IndexT, OffsetT, ValueT>(csr, properties);
 }
 
-}
+}  // namespace clutra::graph

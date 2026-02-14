@@ -5,39 +5,36 @@
 
 #include <frontier/frontier.cuh>
 #include <graph/graph.cuh>
-#include <utils/profile.cuh>
 #include <stdexcept>
-#include <type_traits>
-#include <thrust/reduce.h>
-#include <thrust/functional.h>
 #include <thrust/device_ptr.h>
-#include <thrust/transform_reduce.h>
 #include <thrust/execution_policy.h>
+#include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
+#include <thrust/reduce.h>
+#include <thrust/transform_reduce.h>
+#include <type_traits>
+#include <utils/profile.cuh>
 
 namespace clutra::frontier {
 
 namespace detail {
-template<typename WordT, typename Enable = void>
+template <typename WordT, typename Enable = void>
 struct DevicePopcount;
 
-template<typename WordT>
+template <typename WordT>
 struct DevicePopcount<WordT, std::enable_if_t<(sizeof(WordT) <= sizeof(uint32_t))>> {
-  __device__ static size_t eval(WordT value) {
-    return static_cast<size_t>(__popc(static_cast<uint32_t>(value)));
-  }
+  __device__ static size_t eval(WordT value) { return static_cast<size_t>(__popc(static_cast<uint32_t>(value))); }
 };
 
-template<typename WordT>
+template <typename WordT>
 struct DevicePopcount<WordT, std::enable_if_t<(sizeof(WordT) > sizeof(uint32_t))>> {
   __device__ static size_t eval(WordT value) {
     return static_cast<size_t>(__popcll(static_cast<unsigned long long>(value)));
   }
 };
 
-__global__ void mergeLevelKernel(clutra::detail::types::bitmap_type_t* dst,
-                                   const clutra::detail::types::bitmap_type_t* src,
-                                   size_t n) {
+__global__ void
+mergeLevelKernel(clutra::detail::types::bitmap_type_t* dst, const clutra::detail::types::bitmap_type_t* src, size_t n) {
   size_t idx = (blockIdx.x * blockDim.x) + threadIdx.x;
   size_t stride = gridDim.x * blockDim.x;
   for (; idx < n; idx += stride) {
@@ -46,8 +43,8 @@ __global__ void mergeLevelKernel(clutra::detail::types::bitmap_type_t* dst,
 }
 
 __global__ void intersectMLBFrontierKernel(clutra::detail::types::bitmap_type_t* dst,
-                                              const clutra::detail::types::bitmap_type_t* src,
-                                              size_t n) {
+                                           const clutra::detail::types::bitmap_type_t* src,
+                                           size_t n) {
   size_t idx = (blockIdx.x * blockDim.x) + threadIdx.x;
   size_t stride = gridDim.x * blockDim.x;
   for (; idx < n; idx += stride) {
@@ -55,11 +52,8 @@ __global__ void intersectMLBFrontierKernel(clutra::detail::types::bitmap_type_t*
   }
 }
 
-template<typename DeviceFrontier>
-__global__ void computeActiveFrontierKernel(DeviceFrontier bitmap,
-                                            size_t level_size,
-                                            uint32_t range,
-                                            bool invert) {
+template <typename DeviceFrontier>
+__global__ void computeActiveFrontierKernel(DeviceFrontier bitmap, size_t level_size, uint32_t range, bool invert) {
   using bitmap_type = typename DeviceFrontier::bitmap_type;
   extern __shared__ unsigned char smem[];
   __shared__ uint32_t local_size;
@@ -79,8 +73,7 @@ __global__ void computeActiveFrontierKernel(DeviceFrontier bitmap,
     const bitmap_type max_value = static_cast<bitmap_type>(~static_cast<bitmap_type>(0));
     for (uint16_t bit = 0; bit < range; ++bit) {
       bool is_active = (data & (static_cast<bitmap_type>(1) << bit)) != 0;
-      if ((!invert && !is_active)
-          || (invert && (is_active && bitmap.getData(0)[bit + (gid * range)] == max_value))) {
+      if ((!invert && !is_active) || (invert && (is_active && bitmap.getData(0)[bit + (gid * range)] == max_value))) {
         continue;
       }
       uint32_t slot = atomicAdd(&local_size, 1);
@@ -104,9 +97,9 @@ __global__ void computeActiveFrontierKernel(DeviceFrontier bitmap,
     bitmap.getOffsets()[global_offset + i] = local_offsets[i];
   }
 }
-} // namespace detail
+}  // namespace detail
 
-template<typename T, size_t Levels>
+template <typename T, size_t Levels>
 FrontierMLB<T, Levels>::FrontierMLB(size_t num_elems) : _bitmap(num_elems) {
   bitmap_type* ptr[Levels];
 #pragma unroll
@@ -128,16 +121,19 @@ FrontierMLB<T, Levels>::FrontierMLB(size_t num_elems) : _bitmap(num_elems) {
   _bitmap.setOffsetsSize(offsets_size);
 }
 
-template<typename T, size_t Levels>
+template <typename T, size_t Levels>
 FrontierMLB<T, Levels>::FrontierMLB(const FrontierMLB& other) : FrontierMLB(other.getNumElems()) {
   *this = other;
 }
 
-template<typename T, size_t Levels>
-FrontierMLB<T, Levels>::FrontierMLB(FrontierMLB&& other) noexcept : _bitmap(other._bitmap), _host_offsets_size(other._host_offsets_size) {
+template <typename T, size_t Levels>
+FrontierMLB<T, Levels>::FrontierMLB(FrontierMLB&& other) noexcept
+    : _bitmap(other._bitmap), _host_offsets_size(other._host_offsets_size) {
   bitmap_type* null_ptrs[Levels];
 #pragma unroll
-  for (size_t i = 0; i < Levels; ++i) { null_ptrs[i] = nullptr; }
+  for (size_t i = 0; i < Levels; ++i) {
+    null_ptrs[i] = nullptr;
+  }
   other._bitmap.setData(null_ptrs);
   other._bitmap.setOffsets(nullptr);
   other._bitmap.setOffsetsSize(nullptr);
@@ -146,7 +142,7 @@ FrontierMLB<T, Levels>::FrontierMLB(FrontierMLB&& other) noexcept : _bitmap(othe
   other._active_frontier_status.reset();
 }
 
-template<typename T, size_t Levels>
+template <typename T, size_t Levels>
 FrontierMLB<T, Levels>::~FrontierMLB() {
 #pragma unroll
   for (size_t i = 0; i < Levels; i++) {
@@ -163,22 +159,19 @@ FrontierMLB<T, Levels>::~FrontierMLB() {
   this->_active_frontier_status.reset();
 }
 
-template<typename T, size_t Levels>
+template <typename T, size_t Levels>
 bool FrontierMLB<T, Levels>::empty() const {
   auto bitmap = this->getDeviceFrontier();
   size_t bitmap_size = bitmap.getBitmapSize(Levels - 1);
 
   thrust::device_ptr<bitmap_type> dev_ptr(bitmap.getData(Levels - 1));
   clutra::profile::KernelProfiler profiler("emptyKernel", "core");
-  bitmap_type result = thrust::reduce(
-      thrust::device,
-      dev_ptr,
-      dev_ptr + bitmap_size);
+  bitmap_type result = thrust::reduce(thrust::device, dev_ptr, dev_ptr + bitmap_size);
   profiler.stop();
   return !result;
 }
 
-template<typename T, size_t Levels>
+template <typename T, size_t Levels>
 bool FrontierMLB<T, Levels>::check(size_t idx) const {
   auto bitmap = this->getDeviceFrontier();
   const uint32_t range = bitmap.getBitmapRange();
@@ -194,7 +187,7 @@ bool FrontierMLB<T, Levels>::check(size_t idx) const {
   return (word & (static_cast<bitmap_type>(1) << (idx % range))) != 0;
 }
 
-template<typename T, size_t Levels>
+template <typename T, size_t Levels>
 bool FrontierMLB<T, Levels>::insert(size_t idx) {
   this->_active_frontier_status.reset();
   auto bitmap = this->getDeviceFrontier();
@@ -206,7 +199,7 @@ bool FrontierMLB<T, Levels>::insert(size_t idx) {
   return true;
 }
 
-template<typename T, size_t Levels>
+template <typename T, size_t Levels>
 bool FrontierMLB<T, Levels>::remove(size_t idx) {
   this->_active_frontier_status.reset();
   auto bitmap = this->getDeviceFrontier();
@@ -218,7 +211,7 @@ bool FrontierMLB<T, Levels>::remove(size_t idx) {
   return true;
 }
 
-template<typename T, size_t Levels>
+template <typename T, size_t Levels>
 size_t FrontierMLB<T, Levels>::size() const {
   auto bitmap = this->getDeviceFrontier();
   size_t frontier_size = this->getBitmapSize();
@@ -239,19 +232,14 @@ size_t FrontierMLB<T, Levels>::size() const {
 
   clutra::profile::KernelProfiler profiler("sizeKernel", "operational");
   thrust::device_ptr<bitmap_type> dev_ptr(bitmap.getData());
-  size_t result = thrust::transform_reduce(
-      thrust::device,
-      dev_ptr,
-      dev_ptr + frontier_size,
-      count_bits_functor,
-      static_cast<size_t>(0),
-      thrust::plus<size_t>());
+  size_t result = thrust::transform_reduce(thrust::device, dev_ptr, dev_ptr + frontier_size, count_bits_functor,
+                                           static_cast<size_t>(0), thrust::plus<size_t>());
 
   profiler.stop();
   return result;
 }
 
-template<typename T, size_t Levels>
+template <typename T, size_t Levels>
 FrontierMLB<T, Levels>& FrontierMLB<T, Levels>::operator=(const FrontierMLB& other) {
   if (this == &other) {
     return *this;
@@ -260,11 +248,13 @@ FrontierMLB<T, Levels>& FrontierMLB<T, Levels>::operator=(const FrontierMLB& oth
     throw std::runtime_error("Cannot assign frontiers with different capacities.");
   }
   for (size_t i = 0; i < Levels; i++) {
-    CUDA_CHECK(cudaMemcpy(_bitmap.getData(i), other._bitmap.getData(i), _bitmap.getBitmapSize(i) * sizeof(bitmap_type), cudaMemcpyDeviceToDevice));
+    CUDA_CHECK(cudaMemcpy(_bitmap.getData(i), other._bitmap.getData(i), _bitmap.getBitmapSize(i) * sizeof(bitmap_type),
+                          cudaMemcpyDeviceToDevice));
   }
+  CUDA_CHECK(cudaMemcpy(_bitmap.getOffsets(), other._bitmap.getOffsets(), _bitmap.getBitmapSize() * sizeof(int),
+                        cudaMemcpyDeviceToDevice));
   CUDA_CHECK(
-      cudaMemcpy(_bitmap.getOffsets(), other._bitmap.getOffsets(), _bitmap.getBitmapSize() * sizeof(int), cudaMemcpyDeviceToDevice));
-  CUDA_CHECK(cudaMemcpy(_bitmap.getOffsetsSize(), other._bitmap.getOffsetsSize(), sizeof(uint32_t), cudaMemcpyDeviceToDevice));
+      cudaMemcpy(_bitmap.getOffsetsSize(), other._bitmap.getOffsetsSize(), sizeof(uint32_t), cudaMemcpyDeviceToDevice));
   if (_host_offsets_size != nullptr) {
     if (other._host_offsets_size != nullptr) {
       *_host_offsets_size = *other._host_offsets_size;
@@ -278,7 +268,7 @@ FrontierMLB<T, Levels>& FrontierMLB<T, Levels>::operator=(const FrontierMLB& oth
   return *this;
 }
 
-template<typename T, size_t Levels>
+template <typename T, size_t Levels>
 FrontierMLB<T, Levels>& FrontierMLB<T, Levels>::operator=(FrontierMLB&& other) noexcept {
   if (this == &other) {
     return *this;
@@ -287,7 +277,7 @@ FrontierMLB<T, Levels>& FrontierMLB<T, Levels>::operator=(FrontierMLB&& other) n
   return *this;
 }
 
-template<typename T, size_t Levels>
+template <typename T, size_t Levels>
 void FrontierMLB<T, Levels>::merge(FrontierMLB<T, Levels>& other) {
   this->_active_frontier_status.reset();
   clutra::profile::KernelProfiler profiler("mergeLevelKernel", "operational");
@@ -312,7 +302,7 @@ void FrontierMLB<T, Levels>::merge(FrontierMLB<T, Levels>& other) {
   profiler.stop();
 }
 
-template<typename T, size_t Levels>
+template <typename T, size_t Levels>
 void FrontierMLB<T, Levels>::intersect(FrontierMLB<T, Levels>& other) {
   this->_active_frontier_status.reset();
   clutra::profile::KernelProfiler profiler("intersectMLBFrontierKernel", "operational");
@@ -337,7 +327,7 @@ void FrontierMLB<T, Levels>::intersect(FrontierMLB<T, Levels>& other) {
   profiler.stop();
 }
 
-template<typename T, size_t Levels>
+template <typename T, size_t Levels>
 void FrontierMLB<T, Levels>::clear() {
   this->_active_frontier_status.reset();
   clutra::profile::KernelProfiler profiler("clearKernel", "core");
@@ -347,11 +337,13 @@ void FrontierMLB<T, Levels>::clear() {
   }
   CUDA_CHECK(cudaMemset(_bitmap.getOffsets(), 0, _bitmap.getBitmapSize() * sizeof(int)));
   CUDA_CHECK(cudaMemset(_bitmap.getOffsetsSize(), 0, sizeof(uint32_t)));
-  if (_host_offsets_size != nullptr) { *_host_offsets_size = 0; }
+  if (_host_offsets_size != nullptr) {
+    *_host_offsets_size = 0;
+  }
   profiler.stop();
 }
 
-template<typename T, size_t Levels>
+template <typename T, size_t Levels>
 void FrontierMLB<T, Levels>::computeActiveFrontier(bool invert) {
   if (_active_frontier_status.isComputed(invert)) {
     return;
@@ -363,13 +355,15 @@ void FrontierMLB<T, Levels>::computeActiveFrontier(bool invert) {
 
   CUDA_CHECK(cudaMemset(bitmap.getOffsetsSize(), 0, sizeof(uint32_t)));
   if (level_size == 0 || range == 0) {
-    if (_host_offsets_size != nullptr) { *_host_offsets_size = 0; }
+    if (_host_offsets_size != nullptr) {
+      *_host_offsets_size = 0;
+    }
     return;
   }
 
   const int threads = 256;
   int blocks = static_cast<int>((level_size + threads - 1) / threads);
-  int shared_mem_size = threads * range * sizeof(int); // each thread can store up to 'range' offsets
+  int shared_mem_size = threads * range * sizeof(int);  // each thread can store up to 'range' offsets
   clutra::profile::KernelProfiler profiler("computeActiveFrontierKernel", "core");
   detail::computeActiveFrontierKernel<<<blocks, threads, shared_mem_size>>>(bitmap, level_size, range, invert);
   CUDA_CHECK(cudaGetLastError());
@@ -377,7 +371,7 @@ void FrontierMLB<T, Levels>::computeActiveFrontier(bool invert) {
   profiler.stop();
 }
 
-template<typename T, size_t Levels>
+template <typename T, size_t Levels>
 size_t FrontierMLB<T, Levels>::getActiveFrontierSize() const {
   if (!this->_active_frontier_status.isAnyComputed()) {
     throw std::runtime_error("Active frontier has not been computed yet.");
@@ -392,8 +386,8 @@ size_t FrontierMLB<T, Levels>::getActiveFrontierSize() const {
   return static_cast<size_t>(value);
 }
 
-template<typename T, size_t Levels>
-template<clutra::graph::detail::GraphConcept GraphT>
+template <typename T, size_t Levels>
+template <clutra::graph::detail::GraphConcept GraphT>
 size_t FrontierMLB<T, Levels>::getOutDegree(const GraphT& graph) {
   if (!this->_active_frontier_status.isComputed(false)) {
     this->computeActiveFrontier(false);
@@ -431,27 +425,24 @@ size_t FrontierMLB<T, Levels>::getOutDegree(const GraphT& graph) {
   };
 
   clutra::profile::KernelProfiler profiler("getOutDegree", "core");
-  auto total_out_degree = thrust::transform_reduce(
-      thrust::device,
-      thrust::make_counting_iterator<uint32_t>(0),
-      thrust::make_counting_iterator<uint32_t>(active_frontier_size),
-      count_out_degree,
-      static_cast<size_t>(0),
-      thrust::plus<size_t>());
+  auto total_out_degree = thrust::transform_reduce(thrust::device, thrust::make_counting_iterator<uint32_t>(0),
+                                                   thrust::make_counting_iterator<uint32_t>(active_frontier_size),
+                                                   count_out_degree, static_cast<size_t>(0), thrust::plus<size_t>());
   profiler.stop();
   return total_out_degree;
-
 }
 
-} // namespace clutra::frontier
+}  // namespace clutra::frontier
 
 // Explicit instantiation(s) for commonly used template arguments
 template class clutra::frontier::FrontierMLB<uint32_t, 2>;
 template class clutra::frontier::FrontierMLB<uint64_t, 2>;
 
 // Explicit instantiation(s) for templated member functions
-#define CLUTRA_INSTANTIATE_GET_OUT_DEGREE(FrontierT, IndexT, ValT) \
-  template size_t clutra::frontier::FrontierMLB<FrontierT, 2>::getOutDegree<clutra::graph::GraphCSR<IndexT, IndexT, ValT>>(const clutra::graph::GraphCSR<IndexT, IndexT, ValT>&);
+#define CLUTRA_INSTANTIATE_GET_OUT_DEGREE(FrontierT, IndexT, ValT)                                                     \
+  template size_t                                                                                                      \
+  clutra::frontier::FrontierMLB<FrontierT, 2>::getOutDegree<clutra::graph::GraphCSR<IndexT, IndexT, ValT>>(            \
+      const clutra::graph::GraphCSR<IndexT, IndexT, ValT>&);
 
 CLUTRA_INSTANTIATE_GET_OUT_DEGREE(uint32_t, uint32_t, float)
 CLUTRA_INSTANTIATE_GET_OUT_DEGREE(uint32_t, uint32_t, double)

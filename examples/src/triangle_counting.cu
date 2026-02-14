@@ -4,9 +4,10 @@
 #include <iostream>
 #include <thrust/device_vector.h>
 
-template <typename DeviceGraphT> struct MergePathsFunctor {
+template <typename DeviceGraphT>
+struct MergePathsFunctor {
   DeviceGraphT graph_dev;
-  int *edges;
+  int* edges;
 
   template <typename U, typename V, typename E, typename W>
   __device__ bool operator()(U u, V v, E e, W w) const {
@@ -30,9 +31,10 @@ template <typename DeviceGraphT> struct MergePathsFunctor {
   }
 };
 
-template <typename DeviceGraphT> struct BinarySearchFunctor {
+template <typename DeviceGraphT>
+struct BinarySearchFunctor {
   DeviceGraphT graph_dev;
-  int *edges;
+  int* edges;
 
   template <typename U, typename V, typename E, typename W>
   __device__ bool operator()(U u, V v, E e, W w) const {
@@ -76,7 +78,7 @@ template <typename DeviceGraphT> struct BinarySearchFunctor {
           top = mid;
         } else if (x > y) {
           bottom = mid;
-        } else { // x == y
+        } else {  // x == y
           edges[threadIdx.x + (blockIdx.x * blockDim.x)] += 1;
           found = true;
           break;
@@ -84,8 +86,7 @@ template <typename DeviceGraphT> struct BinarySearchFunctor {
       }
 
       if (!found) {
-        if (x == col_indices[b_start + bottom] ||
-            x == col_indices[b_start + top]) {
+        if (x == col_indices[b_start + bottom] || x == col_indices[b_start + top]) {
           edges[threadIdx.x + (blockIdx.x * blockDim.x)] += 1;
         }
       }
@@ -94,9 +95,10 @@ template <typename DeviceGraphT> struct BinarySearchFunctor {
   }
 };
 
-template <typename GraphT> size_t validate(const GraphT &graph) {
-  const auto *row_offsets = graph.getRowOffsets();
-  const auto *col_indices = graph.getColumnIndices();
+template <typename GraphT>
+size_t validate(const GraphT& graph) {
+  const auto* row_offsets = graph.getRowOffsets();
+  const auto* col_indices = graph.getColumnIndices();
 
   const size_t vertex_count = graph.getVertexCount();
   std::uint64_t cpu_triangles = 0;
@@ -126,16 +128,15 @@ template <typename GraphT> size_t validate(const GraphT &graph) {
     }
   }
 
-  return cpu_triangles / 3; // Each triangle is counted three times
+  return cpu_triangles / 3;  // Each triangle is counted three times
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   Options opts;
   CLI::App app{"CLUTRA Triangle Counting (TC)"};
   auto cli_handles = configureBaseCLI(app, opts);
   std::string tc_method = "merge";
-  app.add_option("--method", tc_method,
-                 "Triangle counting method: merge or binary (default: merge)")
+  app.add_option("--method", tc_method, "Triangle counting method: merge or binary (default: merge)")
       ->check(CLI::IsMember({"merge", "binary"}));
   CLI11_PARSE(app, argc, argv);
   finalizeGraphOptions(opts, cli_handles);
@@ -159,24 +160,21 @@ int main(int argc, char **argv) {
 
   auto graph_dev = graph.getDeviceGraph();
 
-  int *edges;
+  int* edges;
   cudaMalloc(&edges, sizeof(int) * graph.getVertexCount());
   cudaMemset(edges, 0, sizeof(int) * graph.getVertexCount());
 
   std::cout << "[*] Running TC with method: " << tc_method << std::endl;
   if (tc_method == "binary") {
-    clutra::operators::advance::graph(graph, stealer,
-                                      BinarySearchFunctor{graph_dev, edges});
+    clutra::operators::advance::graph(graph, stealer, BinarySearchFunctor{graph_dev, edges});
   } else {
-    clutra::operators::advance::graph(graph, stealer,
-                                      MergePathsFunctor{graph_dev, edges});
+    clutra::operators::advance::graph(graph, stealer, MergePathsFunctor{graph_dev, edges});
   }
 
   clutra::profile::KernelProfiler profiler("reduce_triangles");
-  std::uint64_t device_triangles = thrust::reduce(
-      thrust::device_ptr<int>(edges),
-      thrust::device_ptr<int>(edges + graph.getVertexCount()), 0LL);
-  device_triangles /= 3; // Each triangle is counted three times
+  std::uint64_t device_triangles =
+      thrust::reduce(thrust::device_ptr<int>(edges), thrust::device_ptr<int>(edges + graph.getVertexCount()), 0LL);
+  device_triangles /= 3;  // Each triangle is counted three times
   profiler.stop();
 
   std::cout << "[*] TC completed" << std::endl;
@@ -188,22 +186,18 @@ int main(int argc, char **argv) {
     auto validation_result = validate(graph);
     if (validation_result != device_triangles) {
       std::cout << failString();
-      std::cout << " (CPU: " << validation_result
-                << ", GPU: " << device_triangles << ")";
+      std::cout << " (CPU: " << validation_result << ", GPU: " << device_triangles << ")";
     } else {
       std::cout << successString();
     }
     std::cout << "] | ";
     auto validation_end = std::chrono::high_resolution_clock::now();
     std::cout << "Validation Time: "
-              << std::chrono::duration_cast<std::chrono::milliseconds>(
-                     validation_end - validation_start)
-                     .count()
+              << std::chrono::duration_cast<std::chrono::milliseconds>(validation_end - validation_start).count()
               << " ms" << std::endl;
   }
 
   cudaFree(edges);
 
-  clutra::profile::KernelProfilerManager::instance().printSummary(
-      opts.profiling_detail);
+  clutra::profile::KernelProfilerManager::instance().printSummary(opts.profiling_detail);
 }

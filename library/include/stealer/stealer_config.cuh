@@ -24,9 +24,7 @@ struct StealerConfig final {
   int global_stealing_chunk_size = 16;
 };
 
-static_assert(std::is_trivially_copyable_v<StealerConfig>,
-              "StealerConfig must be trivially copyable for device use");
-static_assert(std::is_standard_layout_v<StealerConfig>,
-              "StealerConfig should be standard layout");
+static_assert(std::is_trivially_copyable_v<StealerConfig>, "StealerConfig must be trivially copyable for device use");
+static_assert(std::is_standard_layout_v<StealerConfig>, "StealerConfig should be standard layout");
 
-} // namespace clutra::stealer
+}  // namespace clutra::stealer

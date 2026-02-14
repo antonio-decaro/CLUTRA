@@ -5,11 +5,11 @@
 #include <fstream>
 #include <iostream>
 
+#include <clutra.hpp>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <clutra.hpp>
 
-template<typename ValueT, typename IndexT, typename OffsetT>
+template <typename ValueT, typename IndexT, typename OffsetT>
 void writeToFile(const std::string& filename, const clutra::formats::CSR<ValueT, IndexT, OffsetT>& csr) {
   std::cout << "[**] Writing to file" << std::endl;
   std::ofstream out_file(filename, std::ios::binary);

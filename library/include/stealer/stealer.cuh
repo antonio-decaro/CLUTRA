@@ -19,12 +19,15 @@ template <typename DerivedT, typename DeviceStealerT>
 class StealerBase {
 public:
   __host__ StealerBase() : _config() {}
+
   __host__ StealerBase(const StealerConfig& config) : _config(config) {}
 
   __host__ void enableIntraClusterStealing() { _config.intra_cluster_stealing_enabled = true; }
+
   __host__ void disableIntraClusterStealing() { _config.intra_cluster_stealing_enabled = false; }
-  
+
   __host__ bool isIntraClusterStealingEnabled() const { return _config.intra_cluster_stealing_enabled; }
+
   __host__ int getPreferredClusterSize() const { return _config.preferred_cluster_size; }
 
   template <size_t BlockSize>
@@ -32,9 +35,7 @@ public:
     return sizeof(typename DeviceStealerT::template SharedState<BlockSize>);
   }
 
-  __host__ DeviceStealerT getDeviceStealer() const {
-    return DeviceStealerT{_config};
-  }
+  __host__ DeviceStealerT getDeviceStealer() const { return DeviceStealerT{_config}; }
 
 protected:
   StealerConfig _config;
@@ -54,4 +55,4 @@ public:
   __host__ BasicStealer(const StealerConfig& config = {}) : StealerBase<BasicStealer, BasicStealerDevice>(config) {}
 };
 
-} // namespace clutra::stealer
+}  // namespace clutra::stealer

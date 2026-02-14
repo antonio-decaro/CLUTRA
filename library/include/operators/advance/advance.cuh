@@ -9,13 +9,13 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <frontier/frontier.cuh>
-#include <graph/graph.cuh>
 #include <graph/concept.hpp>
+#include <graph/graph.cuh>
 #include <operators/advance/advance_mlb.cuh>
 #include <operators/advance/options.hpp>
 #include <stealer/stealer.cuh>
-#include <utils/profile.cuh>
 #include <utils/device.cuh>
+#include <utils/profile.cuh>
 
 namespace clutra::operators::advance {
 
@@ -27,27 +27,47 @@ namespace clutra::operators::advance {
  * @param stealer The stealer configuration for load balancing.
  * @param functor The user-defined functor to apply during the advance.
  */
-template<clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename DeviceStealerT, typename LambdaT>
-void push(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, clutra::frontier::FrontierMLB<>& output_frontier, const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer, LambdaT&& functor) {
-  detail::launchKernel<detail::advance_direction::push>(graph, input_frontier, &output_frontier, stealer, std::forward<LambdaT>(functor));
+template <clutra::graph::detail::GraphConcept GraphT,
+          typename DerivedStealerT,
+          typename DeviceStealerT,
+          typename LambdaT>
+void push(const GraphT& graph,
+          clutra::frontier::FrontierMLB<>& input_frontier,
+          clutra::frontier::FrontierMLB<>& output_frontier,
+          const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer,
+          LambdaT&& functor) {
+  detail::launchKernel<detail::advance_direction::push>(graph, input_frontier, &output_frontier, stealer,
+                                                        std::forward<LambdaT>(functor));
 }
 
 // Overload for advance in push mode without stealer (uses NullStealer).
-template<clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
-void push(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, clutra::frontier::FrontierMLB<>& output_frontier, LambdaT&& functor) {
-  detail::launchKernel<detail::advance_direction::push>(graph, input_frontier, &output_frontier, clutra::stealer::NullStealer{}, std::forward<LambdaT>(functor));
+template <clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
+void push(const GraphT& graph,
+          clutra::frontier::FrontierMLB<>& input_frontier,
+          clutra::frontier::FrontierMLB<>& output_frontier,
+          LambdaT&& functor) {
+  detail::launchKernel<detail::advance_direction::push>(graph, input_frontier, &output_frontier,
+                                                        clutra::stealer::NullStealer{}, std::forward<LambdaT>(functor));
 }
 
 // Overload for advance when no output frontier is needed (e.g., counting-only or side-effect functors).
-template<clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
+template <clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
 void push(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, LambdaT&& functor) {
-  detail::launchKernel<detail::advance_direction::push>(graph, input_frontier, nullptr, clutra::stealer::NullStealer{}, std::forward<LambdaT>(functor));
+  detail::launchKernel<detail::advance_direction::push>(graph, input_frontier, nullptr, clutra::stealer::NullStealer{},
+                                                        std::forward<LambdaT>(functor));
 }
 
 // Overload for advance when no output frontier is needed (e.g., counting-only or side-effect functors).
-template<clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename DeviceStealerT, typename LambdaT>
-void push(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer, LambdaT&& functor) {
-  detail::launchKernel<detail::advance_direction::push>(graph, input_frontier, nullptr, stealer, std::forward<LambdaT>(functor));
+template <clutra::graph::detail::GraphConcept GraphT,
+          typename DerivedStealerT,
+          typename DeviceStealerT,
+          typename LambdaT>
+void push(const GraphT& graph,
+          clutra::frontier::FrontierMLB<>& input_frontier,
+          const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer,
+          LambdaT&& functor) {
+  detail::launchKernel<detail::advance_direction::push>(graph, input_frontier, nullptr, stealer,
+                                                        std::forward<LambdaT>(functor));
 }
 
 /**
@@ -58,21 +78,34 @@ void push(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, 
  * @param stealer The stealer configuration for load balancing.
  * @param functor The user-defined functor to apply during the advance.
  */
-template<clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename DeviceStealerT, typename LambdaT>
-void pull(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, clutra::frontier::FrontierMLB<>& output_frontier, const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer, LambdaT&& functor) {
-  detail::launchKernel<detail::advance_direction::pull>(graph, input_frontier, &output_frontier, stealer, std::forward<LambdaT>(functor));
+template <clutra::graph::detail::GraphConcept GraphT,
+          typename DerivedStealerT,
+          typename DeviceStealerT,
+          typename LambdaT>
+void pull(const GraphT& graph,
+          clutra::frontier::FrontierMLB<>& input_frontier,
+          clutra::frontier::FrontierMLB<>& output_frontier,
+          const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer,
+          LambdaT&& functor) {
+  detail::launchKernel<detail::advance_direction::pull>(graph, input_frontier, &output_frontier, stealer,
+                                                        std::forward<LambdaT>(functor));
 }
 
 // Overload for advance in pull mode without stealer (uses NullStealer).
-template<clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
-void pull(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, clutra::frontier::FrontierMLB<>& output_frontier, LambdaT&& functor) {
-  detail::launchKernel<detail::advance_direction::pull>(graph, input_frontier, &output_frontier, clutra::stealer::NullStealer{}, std::forward<LambdaT>(functor));
+template <clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
+void pull(const GraphT& graph,
+          clutra::frontier::FrontierMLB<>& input_frontier,
+          clutra::frontier::FrontierMLB<>& output_frontier,
+          LambdaT&& functor) {
+  detail::launchKernel<detail::advance_direction::pull>(graph, input_frontier, &output_frontier,
+                                                        clutra::stealer::NullStealer{}, std::forward<LambdaT>(functor));
 }
 
 // Overload for advance when no output frontier is needed (e.g., counting-only or side-effect functors).
-template<clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
+template <clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
 void pull(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, LambdaT&& functor) {
-  detail::launchKernel<detail::advance_direction::pull>(graph, input_frontier, nullptr, clutra::stealer::NullStealer{}, std::forward<LambdaT>(functor));
+  detail::launchKernel<detail::advance_direction::pull>(graph, input_frontier, nullptr, clutra::stealer::NullStealer{},
+                                                        std::forward<LambdaT>(functor));
 }
 
 /**
@@ -83,21 +116,34 @@ void pull(const GraphT& graph, clutra::frontier::FrontierMLB<>& input_frontier, 
  * @param stealer The stealer configuration for load balancing.
  * @param functor The user-defined functor to apply during the advance.
  */
-template<clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename DeviceStealerT, typename LambdaT>
-void graph(const GraphT& graph, clutra::frontier::FrontierMLB<>& output_frontier, const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer, LambdaT&& functor) {
-  detail::launchKernel<detail::advance_direction::push>(graph, &output_frontier, stealer, std::forward<LambdaT>(functor));
+template <clutra::graph::detail::GraphConcept GraphT,
+          typename DerivedStealerT,
+          typename DeviceStealerT,
+          typename LambdaT>
+void graph(const GraphT& graph,
+           clutra::frontier::FrontierMLB<>& output_frontier,
+           const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer,
+           LambdaT&& functor) {
+  detail::launchKernel<detail::advance_direction::push>(graph, &output_frontier, stealer,
+                                                        std::forward<LambdaT>(functor));
 }
 
 // Overload for advance in push mode without output frontier (discards results).
-template<clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename DeviceStealerT, typename LambdaT>
-void graph(const GraphT& graph, const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer, LambdaT&& functor) {
+template <clutra::graph::detail::GraphConcept GraphT,
+          typename DerivedStealerT,
+          typename DeviceStealerT,
+          typename LambdaT>
+void graph(const GraphT& graph,
+           const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer,
+           LambdaT&& functor) {
   detail::launchKernel<detail::advance_direction::push>(graph, nullptr, stealer, std::forward<LambdaT>(functor));
 }
 
 // Overload for advance in push mode without stealer (uses NullStealer) and with output frontier.
-template<clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
+template <clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
 void graph(const GraphT& graph, LambdaT&& functor) {
-  detail::launchKernel<detail::advance_direction::push>(graph, nullptr, clutra::stealer::NullStealer{}, std::forward<LambdaT>(functor));
+  detail::launchKernel<detail::advance_direction::push>(graph, nullptr, clutra::stealer::NullStealer{},
+                                                        std::forward<LambdaT>(functor));
 }
 
 /**
@@ -106,15 +152,20 @@ void graph(const GraphT& graph, LambdaT&& functor) {
  * @param stealer The stealer configuration for load balancing.
  * @param functor The user-defined functor to apply to each edge.
  */
-template<clutra::graph::detail::GraphConcept GraphT, typename DerivedStealerT, typename DeviceStealerT, typename LambdaT>
-void edges(const GraphT& graph, const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer, LambdaT&& functor) {
+template <clutra::graph::detail::GraphConcept GraphT,
+          typename DerivedStealerT,
+          typename DeviceStealerT,
+          typename LambdaT>
+void edges(const GraphT& graph,
+           const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer,
+           LambdaT&& functor) {
   detail::launchEdgeKernel(graph, stealer, std::forward<LambdaT>(functor));
 }
 
 // Overload for edge-based advance without stealer (uses NullStealer).
-template<clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
+template <clutra::graph::detail::GraphConcept GraphT, typename LambdaT>
 void edges(const GraphT& graph, LambdaT&& functor) {
   detail::launchEdgeKernel(graph, clutra::stealer::NullStealer{}, std::forward<LambdaT>(functor));
 }
 
-}// namespace clutra::operators::advance
+}  // namespace clutra::operators::advance

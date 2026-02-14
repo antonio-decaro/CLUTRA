@@ -1,5 +1,5 @@
-#include <clutra.hpp>
 #include "utils.hpp"
+#include <clutra.hpp>
 #include <iostream>
 
 int main(int argc, char** argv) {
@@ -17,8 +17,7 @@ int main(int argc, char** argv) {
   std::cerr << "[*] CSR read complete" << std::endl;
   printGraphInfo(graph);
   printStealingOptions(opts);
-  
-  
+
   clutra::frontier::FrontierMLB<uint32_t> frontier(1024);
 
   int device_id;
@@ -26,7 +25,6 @@ int main(int argc, char** argv) {
 
   std::cout << clutra::detail::device::getDeviceName(device_id) << std::endl;
   std::cout << "Num SMs: " << clutra::detail::device::getNumSMs(device_id) << std::endl;
-
 
   if (frontier.empty()) {
     std::cout << "Frontier is initially empty." << std::endl;
@@ -46,21 +44,20 @@ int main(int argc, char** argv) {
   std::cout << frontier.size() << " elements in the frontier." << std::endl;
   frontier.computeActiveFrontier();
   std::cout << "Active frontier size: " << frontier.getActiveFrontierSize() << std::endl;
-  
+
   frontier.remove(10);
   if (!frontier.check(10)) {
     std::cout << "Element 10 has been removed from the frontier." << std::endl;
   } else {
     std::cout << "Element 10 is still in the frontier." << std::endl;
   }
-  
-  
+
   if (frontier.empty()) {
     std::cout << "Frontier is now empty." << std::endl;
   } else {
     std::cout << "Frontier is NOT empty." << std::endl;
   }
-  
+
   std::cout << frontier.size() << " elements in the frontier." << std::endl;
   clutra::profile::KernelProfilerManager::instance().printSummary(opts.profiling_detail);
   return 0;

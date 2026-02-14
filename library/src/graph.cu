@@ -11,7 +11,7 @@
 using namespace clutra::graph;
 
 namespace {
-template<typename IndexT, typename OffsetT, typename ValueT>
+template <typename IndexT, typename OffsetT, typename ValueT>
 void resetDeviceGraph(clutra::graph::detail::GraphCSRDevice<IndexT, OffsetT, ValueT>& device_graph) {
   device_graph._n_rows = 0;
   device_graph._n_nonzeros = 0;
@@ -19,9 +19,9 @@ void resetDeviceGraph(clutra::graph::detail::GraphCSRDevice<IndexT, OffsetT, Val
   device_graph._row_offsets = nullptr;
   device_graph._nnz_values = nullptr;
 }
-} // namespace
+}  // namespace
 
-template<typename IndexT, typename OffsetT, typename ValueT>
+template <typename IndexT, typename OffsetT, typename ValueT>
 GraphCSR<IndexT, OffsetT, ValueT>::GraphCSR(clutra::formats::CSR<ValueT, IndexT, OffsetT>& csr, Properties properties)
     : _csr(csr), _properties(properties) {
   IndexT n_rows = csr.getRowOffsetsSize();
@@ -33,8 +33,10 @@ GraphCSR<IndexT, OffsetT, ValueT>::GraphCSR(clutra::formats::CSR<ValueT, IndexT,
   CUDA_CHECK(cudaMalloc(&column_indices, n_nonzeros * sizeof(OffsetT)));
   CUDA_CHECK(cudaMalloc(&nnz_values, n_nonzeros * sizeof(ValueT)));
 
-  CUDA_CHECK(cudaMemcpy(row_offsets, csr.getRowOffsets().data(), (n_rows + 1) * sizeof(IndexT), cudaMemcpyHostToDevice));
-  CUDA_CHECK(cudaMemcpy(column_indices, csr.getColumnIndices().data(), n_nonzeros * sizeof(OffsetT), cudaMemcpyHostToDevice));
+  CUDA_CHECK(
+      cudaMemcpy(row_offsets, csr.getRowOffsets().data(), (n_rows + 1) * sizeof(IndexT), cudaMemcpyHostToDevice));
+  CUDA_CHECK(
+      cudaMemcpy(column_indices, csr.getColumnIndices().data(), n_nonzeros * sizeof(OffsetT), cudaMemcpyHostToDevice));
   CUDA_CHECK(cudaMemcpy(nnz_values, csr.getValues().data(), n_nonzeros * sizeof(ValueT), cudaMemcpyHostToDevice));
 
   this->_device_graph = {n_rows, n_nonzeros, column_indices, row_offsets, nnz_values};
@@ -49,9 +51,12 @@ GraphCSR<IndexT, OffsetT, ValueT>::GraphCSR(clutra::formats::CSR<ValueT, IndexT,
     CUDA_CHECK(cudaMalloc(&inv_column_indices, n_nonzeros * sizeof(OffsetT)));
     CUDA_CHECK(cudaMalloc(&inv_nnz_values, n_nonzeros * sizeof(ValueT)));
 
-    CUDA_CHECK(cudaMemcpy(inv_row_offsets, inverted_csr.getRowOffsets().data(), (n_rows + 1) * sizeof(IndexT), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(inv_column_indices, inverted_csr.getColumnIndices().data(), n_nonzeros * sizeof(OffsetT), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(inv_nnz_values, inverted_csr.getValues().data(), n_nonzeros * sizeof(ValueT), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(inv_row_offsets, inverted_csr.getRowOffsets().data(), (n_rows + 1) * sizeof(IndexT),
+                          cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(inv_column_indices, inverted_csr.getColumnIndices().data(), n_nonzeros * sizeof(OffsetT),
+                          cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(inv_nnz_values, inverted_csr.getValues().data(), n_nonzeros * sizeof(ValueT),
+                          cudaMemcpyHostToDevice));
 
     this->_inverse_device_graph = {n_rows, n_nonzeros, inv_column_indices, inv_row_offsets, inv_nnz_values};
   } else {
@@ -59,9 +64,10 @@ GraphCSR<IndexT, OffsetT, ValueT>::GraphCSR(clutra::formats::CSR<ValueT, IndexT,
   }
 }
 
-template<typename IndexT, typename OffsetT, typename ValueT>
+template <typename IndexT, typename OffsetT, typename ValueT>
 GraphCSR<IndexT, OffsetT, ValueT>::GraphCSR(GraphCSR&& other) noexcept
-    : _csr(other._csr), _properties(other._properties), _device_graph(other._device_graph), _inverse_device_graph(other._inverse_device_graph) {
+    : _csr(other._csr), _properties(other._properties), _device_graph(other._device_graph),
+      _inverse_device_graph(other._inverse_device_graph) {
   resetDeviceGraph(other._device_graph);
   if (_properties.directed) {
     resetDeviceGraph(other._inverse_device_graph);
@@ -71,7 +77,7 @@ GraphCSR<IndexT, OffsetT, ValueT>::GraphCSR(GraphCSR&& other) noexcept
   other._properties = {};
 }
 
-template<typename IndexT, typename OffsetT, typename ValueT>
+template <typename IndexT, typename OffsetT, typename ValueT>
 GraphCSR<IndexT, OffsetT, ValueT>::~GraphCSR() {
   if (_device_graph._row_offsets != nullptr) {
     CUDA_CHECK(cudaFree(_device_graph._row_offsets));
@@ -101,24 +107,27 @@ GraphCSR<IndexT, OffsetT, ValueT>::~GraphCSR() {
   }
 }
 
+template <typename IndexT, typename OffsetT, typename ValueT>
+size_t GraphCSR<IndexT, OffsetT, ValueT>::getVertexCount() const {
+  return _device_graph.getVertexCount();
+}
 
-template<typename IndexT, typename OffsetT, typename ValueT>
-size_t GraphCSR<IndexT, OffsetT, ValueT>::getVertexCount() const { return _device_graph.getVertexCount(); }
+template <typename IndexT, typename OffsetT, typename ValueT>
+size_t GraphCSR<IndexT, OffsetT, ValueT>::getEdgeCount() const {
+  return _device_graph.getEdgeCount();
+}
 
-template<typename IndexT, typename OffsetT, typename ValueT>
-size_t GraphCSR<IndexT, OffsetT, ValueT>::getEdgeCount() const { return _device_graph.getEdgeCount(); }
-
-template<typename IndexT, typename OffsetT, typename ValueT>
+template <typename IndexT, typename OffsetT, typename ValueT>
 size_t GraphCSR<IndexT, OffsetT, ValueT>::getDegree(vertex_t vertex) const {
   return _csr.getRowOffsets()[vertex + 1] - _csr.getRowOffsets()[vertex];
 }
 
-template<typename IndexT, typename OffsetT, typename ValueT>
+template <typename IndexT, typename OffsetT, typename ValueT>
 GraphCSR<IndexT, OffsetT, ValueT>::vertex_t GraphCSR<IndexT, OffsetT, ValueT>::getFirstNeighbor(vertex_t vertex) const {
   return _csr.getRowOffsets()[vertex];
 }
 
-template<typename IndexT, typename OffsetT, typename ValueT>
+template <typename IndexT, typename OffsetT, typename ValueT>
 GraphCSR<IndexT, OffsetT, ValueT>::vertex_t GraphCSR<IndexT, OffsetT, ValueT>::getSourceVertex(edge_t edge) const {
   // binary search
   vertex_t low = 0;
@@ -127,7 +136,7 @@ GraphCSR<IndexT, OffsetT, ValueT>::vertex_t GraphCSR<IndexT, OffsetT, ValueT>::g
     vertex_t mid = low + ((high - low) / 2);
     if (_csr.getRowOffsets()[mid] <= edge && edge < _csr.getRowOffsets()[mid + 1]) {
       return mid;
-    } 
+    }
     if (_csr.getRowOffsets()[mid] > edge) {
       high = mid - 1;
     } else {
@@ -137,12 +146,12 @@ GraphCSR<IndexT, OffsetT, ValueT>::vertex_t GraphCSR<IndexT, OffsetT, ValueT>::g
   return _csr.getRowOffsetsSize();
 }
 
-template<typename IndexT, typename OffsetT, typename ValueT>
+template <typename IndexT, typename OffsetT, typename ValueT>
 GraphCSR<IndexT, OffsetT, ValueT>::vertex_t GraphCSR<IndexT, OffsetT, ValueT>::getDestinationVertex(edge_t edge) const {
   return _csr.getColumnIndices()[edge];
 }
 
-template<typename IndexT, typename OffsetT, typename ValueT>
+template <typename IndexT, typename OffsetT, typename ValueT>
 GraphCSR<IndexT, OffsetT, ValueT>::weight_t GraphCSR<IndexT, OffsetT, ValueT>::getEdgeWeight(edge_t edge) const {
   return _csr.getValues()[edge];
 }
