@@ -5,8 +5,8 @@
 
 #pragma once
 
-#include <cuda_runtime.h>
 #include "misc.cuh"
+#include <cuda_runtime.h>
 
 namespace clutra::detail::kernels {
 
@@ -20,13 +20,11 @@ struct LaunchConfig {
 
 inline bool isClusterLaunchSupported(int device = 0) {
   int cluster_supported = 0;
-  CUDA_CHECK(cudaDeviceGetAttribute(&cluster_supported,
-                                    cudaDevAttrClusterLaunch,
-                                    device));
+  CUDA_CHECK(cudaDeviceGetAttribute(&cluster_supported, cudaDevAttrClusterLaunch, device));
   return cluster_supported != 0;
 }
 
-template<typename KernelT, typename... Args>
+template <typename KernelT, typename... Args>
 inline void launchClusterKernelImpl(size_t grid_size,
                                     size_t block_size,
                                     size_t cluster_size,
@@ -55,34 +53,26 @@ inline void launchClusterKernelImpl(size_t grid_size,
   CUDA_CHECK(cudaLaunchKernelEx(&config, kernel, args...));
 }
 
-template<typename KernelT, typename... Args>
+template <typename KernelT, typename... Args>
 inline void launchClusterKernel(const LaunchConfig& config,
                                 size_t dynamic_smem_bytes,
                                 cudaStream_t stream,
                                 KernelT kernel,
                                 Args... args) {
-  launchClusterKernelImpl(config.grid_size,
-                          config.block_size,
-                          config.cluster_size,
-                          dynamic_smem_bytes,
-                          stream,
-                          kernel,
+  launchClusterKernelImpl(config.grid_size, config.block_size, config.cluster_size, dynamic_smem_bytes, stream, kernel,
                           args...);
 }
 
-template<typename KernelT, typename... Args>
-inline void launchClusterKernel(const LaunchConfig& config,
-                                KernelT kernel,
-                                Args... args) {
+template <typename KernelT, typename... Args>
+inline void launchClusterKernel(const LaunchConfig& config, KernelT kernel, Args... args) {
   launchClusterKernelImpl(config.grid_size, config.block_size, config.cluster_size, 0, 0, kernel, args...);
 }
 
-template<typename KernelT, typename... Args>
-inline void launchClusterKernel(const LaunchConfig& config,
-                                const size_t& dynamic_smem_bytes,
-                                KernelT kernel,
-                                Args... args) {
-  launchClusterKernelImpl(config.grid_size, config.block_size, config.cluster_size, dynamic_smem_bytes, 0, kernel, args...);
+template <typename KernelT, typename... Args>
+inline void
+launchClusterKernel(const LaunchConfig& config, const size_t& dynamic_smem_bytes, KernelT kernel, Args... args) {
+  launchClusterKernelImpl(config.grid_size, config.block_size, config.cluster_size, dynamic_smem_bytes, 0, kernel,
+                          args...);
 }
 
 /**
@@ -97,10 +87,9 @@ inline void launchClusterKernel(const LaunchConfig& config,
  * @return LaunchConfig: Adjusted LaunchConfig with grid size, block size, and cluster size.
  */
 inline LaunchConfig adjustLaunchConfig(const size_t& preferred_grid_size,
-                              const size_t& preferred_block_size,
-                              const size_t& preferred_cluster_size,
-                              const size_t& workload_size,
-                              auto& stealer) {
+                                       const size_t& preferred_block_size,
+                                       const size_t& preferred_cluster_size,
+                                       const size_t& workload_size) {
   size_t grid_size = preferred_grid_size;
   size_t block_size = preferred_block_size;
   size_t cluster_size = preferred_cluster_size;
@@ -109,7 +98,7 @@ inline LaunchConfig adjustLaunchConfig(const size_t& preferred_grid_size,
     grid_size = (workload_size + preferred_block_size - 1) / preferred_block_size;
   }
 
-  if (preferred_grid_size < cluster_size || !stealer.isIntraClusterStealingEnabled()) {
+  if (preferred_grid_size < cluster_size) {
     cluster_size = 1;
   }
 
@@ -119,11 +108,7 @@ inline LaunchConfig adjustLaunchConfig(const size_t& preferred_grid_size,
     grid_size += (cluster_size - remainder);
   }
 
-  return {
-    .grid_size = grid_size, 
-    .block_size = block_size, 
-    .cluster_size = cluster_size
-  };
+  return {.grid_size = grid_size, .block_size = block_size, .cluster_size = cluster_size};
 }
 
-}
+}  // namespace clutra::detail::kernels

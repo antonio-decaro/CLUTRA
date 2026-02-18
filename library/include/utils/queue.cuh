@@ -65,11 +65,23 @@ struct WorkQueueView {
   uint32_t capacity;
 
   __device__ __forceinline__ void push(const T& item) {
-    auto pos = atomicInc(tail, capacity);
+    auto pos = atomicAdd(tail, 1U);
     data[pos % capacity] = item;
   }
 
-  __device__ __forceinline__ bool pop(T& out) { return false; }
+  __device__ __forceinline__ bool pop(T& out) {
+    lock->acquire();
+    if (*head >= *tail) {
+      lock->release();
+      return false;  // empty
+    }
+    auto pos = *head;
+    (*head)++;
+    lock->release();
+    out = data[pos % capacity];
+
+    return true;
+  }
 
   __device__ __forceinline__ bool steal(T& out) { return false; }
 };

@@ -70,7 +70,10 @@ struct TicketLock {
     }
   }
 
-  __device__ void release() { atomicAdd(&serving, 1); }
+  __device__ void release() {
+    auto r_serving = cuda::atomic_ref<unsigned int, cuda::thread_scope_device>(serving);
+    r_serving.fetch_add(1, cuda::memory_order_release);
+  }
 
   __device__ bool try_acquire() {
     auto r_next = cuda::atomic_ref<unsigned int, cuda::thread_scope_device>(next);

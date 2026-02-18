@@ -211,17 +211,17 @@ template <view View,
           graph::detail::DeviceGraphConcept GraphDevT,
           typename InFrontierDevT,
           typename OutFrontierDevT,
+          typename LockType,
           typename StealerDeviceT,
           typename LambdaT>
-__global__ void
-advanceKernel(GraphDevT graph_dev,
-              InFrontierDevT in_dev_frontier,
-              OutFrontierDevT out_dev_frontier,
-              int coarsening_factor,
-              size_t work_tiles,
-              clutra::detail::utils::WorkQueueView<uint32_t, clutra::detail::atomic::SpinLock>* cluster_work_queues,
-              StealerDeviceT stealer,
-              LambdaT functor) {
+__global__ void advanceKernel(GraphDevT graph_dev,
+                              InFrontierDevT in_dev_frontier,
+                              OutFrontierDevT out_dev_frontier,
+                              int coarsening_factor,
+                              size_t work_tiles,
+                              clutra::detail::utils::WorkQueueView<uint32_t, LockType>* cluster_work_queues,
+                              StealerDeviceT stealer,
+                              LambdaT functor) {
   static_assert(BlockSize % ADVANCE_WARP_SIZE == 0, "BlockSize must be multiple of warp size");
 
   __shared__ clutra::detail::utils::SharedQueue<BlockSize> cta_queue;
@@ -233,7 +233,6 @@ advanceKernel(GraphDevT graph_dev,
   const int lane = tid & (ADVANCE_WARP_SIZE - 1);
   const int block_dim = blockDim.x;
   auto& warp_queue = warp_queues[warp_id];
-  auto cluster = cooperative_groups::this_cluster();
   auto cluster_queue = clutra::detail::utils::getCurrentClusterQueueView(cluster_work_queues);
 
   if (stealer.isStealingEnabled()) {
@@ -242,9 +241,18 @@ advanceKernel(GraphDevT graph_dev,
 
   populateClusterQueue(cluster_queue, work_tiles);
 
-  for (uint32_t tile_idx = cluster.block_rank(); tile_idx < cluster_queue.tail[0]; tile_idx += cluster.num_blocks()) {
-    const uint32_t tile_gid = cluster_queue.data[tile_idx];
-    processTile<View, Direction, BlockSize>(graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, tile_gid,
+  // uint32_t tile = 0;
+  // bool has_tile = false;
+  __shared__ uint32_t tile;
+  while (true) {
+    if (tid == 0 && !cluster_queue.pop(tile)) {
+      tile = UINT32_MAX;  // Mark tile as being processed
+    }
+    __syncthreads();
+    if (tile == UINT32_MAX) {
+      break;
+    }
+    processTile<View, Direction, BlockSize>(graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, tile,
                                             cta_queue, warp_queue, stealer, stealer_state, functor, tid, lane,
                                             block_dim);
   }
