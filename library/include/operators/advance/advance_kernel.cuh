@@ -21,6 +21,8 @@
 
 namespace clutra::operators::advance::detail {
 
+constexpr int ADVANCE_WARP_SIZE = 32;
+
 template <advance_direction Direction,
           graph::detail::DeviceGraphConcept GraphDevT,
           typename FrontierDevT,
@@ -88,6 +90,69 @@ checkVertexActive(const GraphDevT& graph_dev, const FrontierDevT& in_dev_frontie
   }
 }
 
+template <view View,
+          advance_direction Direction,
+          size_t BlockSize,
+          graph::detail::DeviceGraphConcept GraphDevT,
+          typename InFrontierDevT,
+          typename OutFrontierDevT,
+          typename StealerDeviceT,
+          typename LambdaT>
+__device__ __forceinline__ void processTile(GraphDevT graph_dev,
+                                            InFrontierDevT in_dev_frontier,
+                                            OutFrontierDevT out_dev_frontier,
+                                            int coarsening_factor,
+                                            uint32_t tile_gid,
+                                            clutra::detail::utils::SharedQueue<BlockSize>& cta_queue,
+                                            clutra::detail::utils::SharedQueue<ADVANCE_WARP_SIZE>& warp_queue,
+                                            StealerDeviceT stealer,
+                                            typename StealerDeviceT::template SharedState<BlockSize>& stealer_state,
+                                            LambdaT functor,
+                                            int tid,
+                                            int lane,
+                                            int block_dim) {
+  __syncthreads();
+  if (tid == 0) {
+    stealer.setReady(stealer_state, false);
+    cta_queue.init();
+  }
+  if (lane == 0) {
+    warp_queue.init();
+  }
+
+  __syncthreads();
+
+  const uint32_t assigned_vertex = getAssignedVertex<View>(in_dev_frontier, coarsening_factor, tile_gid, tid);
+  const bool vertex_active = checkVertexActive<View, Direction>(graph_dev, in_dev_frontier, assigned_vertex);
+  if (vertex_active) {
+    const uint32_t n_edges = graph_dev.getDegree(assigned_vertex);
+    const uint32_t cta_threshold = block_dim;
+
+    if (n_edges >= cta_threshold) {
+      cta_queue.push(assigned_vertex, n_edges);
+    } else {
+      warp_queue.push(assigned_vertex, n_edges);
+    }
+  }
+
+  __syncthreads();
+  if (tid == 0) {
+    stealer.setReady(stealer_state, true);
+  }
+
+  uint32_t vertex = 0;
+  uint32_t degree = 0;
+  while (cta_queue.pop(vertex, degree)) {
+    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, vertex, degree, tid, block_dim);
+    __syncthreads();
+  }
+
+  for (int i = 0; i < warp_queue.size(); ++i) {
+    processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, warp_queue.vertices[i], warp_queue.degrees[i],
+                                  lane, ADVANCE_WARP_SIZE);
+  }
+}
+
 template <advance_direction Direction,
           size_t BlockSize,
           graph::detail::DeviceGraphConcept GraphDevT,
@@ -119,15 +184,25 @@ runLocalStealLoop(GraphDevT graph_dev,
 
 template <size_t BlockSize>
 size_t getAdvanceSharedMemorySize(size_t stealer_shared_size) {
-  constexpr size_t WARP_SIZE = 32;
   size_t shared_size = 0;
   // CTA queue
   shared_size += clutra::detail::utils::SharedQueue<BlockSize>::getSizeInBytes();
   // Warp queues
-  shared_size += (BlockSize / WARP_SIZE) * clutra::detail::utils::SharedQueue<WARP_SIZE>::getSizeInBytes();
+  shared_size +=
+      (BlockSize / ADVANCE_WARP_SIZE) * clutra::detail::utils::SharedQueue<ADVANCE_WARP_SIZE>::getSizeInBytes();
   // Stealer shared state
   shared_size += stealer_shared_size;
   return shared_size;
+}
+
+template <typename WorkQueue>
+__device__ __forceinline__ void populateClusterQueue(WorkQueue& cluster_queue, size_t work_tiles) {
+  if (threadIdx.x == 0) {
+    for (int i = blockIdx.x; i < work_tiles; i += gridDim.x) {
+      cluster_queue.push(i);
+    }
+  }
+  cooperative_groups::this_cluster().sync();
 }
 
 template <view View,
@@ -138,72 +213,40 @@ template <view View,
           typename OutFrontierDevT,
           typename StealerDeviceT,
           typename LambdaT>
-__global__ void advanceKernel(GraphDevT graph_dev,
-                              InFrontierDevT in_dev_frontier,
-                              OutFrontierDevT out_dev_frontier,
-                              int coarsening_factor,
-                              size_t total_iters,
-                              StealerDeviceT stealer,
-                              LambdaT functor) {
-  constexpr int WARP_SIZE = 32;
-  static_assert(BlockSize % WARP_SIZE == 0, "BlockSize must be multiple of warp size");
+__global__ void
+advanceKernel(GraphDevT graph_dev,
+              InFrontierDevT in_dev_frontier,
+              OutFrontierDevT out_dev_frontier,
+              int coarsening_factor,
+              size_t work_tiles,
+              clutra::detail::utils::WorkQueueView<uint32_t, clutra::detail::atomic::SpinLock>* cluster_work_queues,
+              StealerDeviceT stealer,
+              LambdaT functor) {
+  static_assert(BlockSize % ADVANCE_WARP_SIZE == 0, "BlockSize must be multiple of warp size");
 
   __shared__ clutra::detail::utils::SharedQueue<BlockSize> cta_queue;
-  __shared__ clutra::detail::utils::SharedQueue<WARP_SIZE> warp_queues[BlockSize / WARP_SIZE];
+  __shared__ clutra::detail::utils::SharedQueue<ADVANCE_WARP_SIZE> warp_queues[BlockSize / ADVANCE_WARP_SIZE];
   __shared__ typename StealerDeviceT::template SharedState<BlockSize> stealer_state;
 
   const int tid = threadIdx.x;
   const int warp_id = tid >> 5;
-  const int lane = tid & (WARP_SIZE - 1);
+  const int lane = tid & (ADVANCE_WARP_SIZE - 1);
   const int block_dim = blockDim.x;
   auto& warp_queue = warp_queues[warp_id];
+  auto cluster = cooperative_groups::this_cluster();
+  auto cluster_queue = clutra::detail::utils::getCurrentClusterQueueView(cluster_work_queues);
 
   if (stealer.isStealingEnabled()) {
     stealer.template init<BlockSize>(&cta_queue, stealer_state);
   }
 
-  for (size_t iter = 0; iter < total_iters; ++iter) {  // TODO change with stealing with ptx (only sm_100)
-    const uint32_t tile_gid = static_cast<uint32_t>(blockIdx.x + (iter * gridDim.x));
+  populateClusterQueue(cluster_queue, work_tiles);
 
-    __syncthreads();
-    if (tid == 0) {
-      stealer.setReady(stealer_state, false);
-      cta_queue.init();
-    }
-    if (lane == 0) {
-      warp_queue.init();
-    }
-
-    __syncthreads();
-
-    const uint32_t assigned_vertex = getAssignedVertex<View>(in_dev_frontier, coarsening_factor, tile_gid, tid);
-    const bool vertex_active = checkVertexActive<View, Direction>(graph_dev, in_dev_frontier, assigned_vertex);
-    if (vertex_active) {
-      const uint32_t n_edges = graph_dev.getDegree(assigned_vertex);
-      const uint32_t cta_threshold = block_dim;
-
-      if (n_edges >= cta_threshold) {
-        cta_queue.push(assigned_vertex, n_edges);
-      } else {
-        warp_queue.push(assigned_vertex, n_edges);
-      }
-    }
-
-    __syncthreads();
-    if (tid == 0) {
-      stealer.setReady(stealer_state, true);
-    }
-
-    uint32_t vertex, degree;
-    while (cta_queue.pop(vertex, degree)) {
-      processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, vertex, degree, tid, block_dim);
-      __syncthreads();
-    }
-
-    for (int i = 0; i < warp_queue.size(); ++i) {
-      processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, warp_queue.vertices[i], warp_queue.degrees[i],
-                                    lane, WARP_SIZE);
-    }
+  for (uint32_t tile_idx = cluster.block_rank(); tile_idx < cluster_queue.tail[0]; tile_idx += cluster.num_blocks()) {
+    const uint32_t tile_gid = cluster_queue.data[tile_idx];
+    processTile<View, Direction, BlockSize>(graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, tile_gid,
+                                            cta_queue, warp_queue, stealer, stealer_state, functor, tid, lane,
+                                            block_dim);
   }
   if (!stealer.isStealingEnabled()) {
     return;
@@ -221,16 +264,15 @@ __device__ uint32_t getAssignedEdge(uint32_t tile_gid, uint32_t tid) {
 template <size_t BlockSize, graph::detail::DeviceGraphConcept GraphDevT, typename StealerDeviceT, typename LambdaT>
 __global__ void advanceKernel(GraphDevT graph_dev, size_t total_iters, StealerDeviceT stealer, LambdaT functor) {
 
-  constexpr int WARP_SIZE = 32;
-  static_assert(BlockSize % WARP_SIZE == 0, "BlockSize must be multiple of warp size");
+  static_assert(BlockSize % ADVANCE_WARP_SIZE == 0, "BlockSize must be multiple of warp size");
 
   __shared__ clutra::detail::utils::SharedQueue<BlockSize> cta_queue;
-  __shared__ clutra::detail::utils::SharedQueue<WARP_SIZE> warp_queues[BlockSize / WARP_SIZE];
+  __shared__ clutra::detail::utils::SharedQueue<ADVANCE_WARP_SIZE> warp_queues[BlockSize / ADVANCE_WARP_SIZE];
   __shared__ typename StealerDeviceT::template SharedState<BlockSize> stealer_state;
 
   const int tid = threadIdx.x;
   const int warp_id = tid >> 5;
-  const int lane = tid & (WARP_SIZE - 1);
+  const int lane = tid & (ADVANCE_WARP_SIZE - 1);
   const int block_dim = blockDim.x;
   auto& warp_queue = warp_queues[warp_id];
 
@@ -254,7 +296,6 @@ __global__ void advanceKernel(GraphDevT graph_dev, size_t total_iters, StealerDe
 
     const uint32_t edge_index = getAssignedEdge(tile_gid, tid);
     if (edge_index < graph_dev.getEdgeCount()) {
-      const auto weight = graph_dev.getEdgeWeight(edge_index);
       const auto src = graph_dev.getSourceVertex(edge_index);
       const auto dst = graph_dev.getDestinationVertex(edge_index);
       size_t tot_degree = graph_dev.getDegree(src) + graph_dev.getDegree(dst);

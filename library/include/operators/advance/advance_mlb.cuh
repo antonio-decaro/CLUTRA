@@ -18,6 +18,7 @@
 #include <utils/device.cuh>
 #include <utils/kernel_launcher.cuh>
 #include <utils/profile.cuh>
+#include <utils/queue.cuh>
 
 namespace clutra::operators::advance::detail {
 
@@ -30,7 +31,7 @@ template <advance_direction Direction,
           typename DerivedStealerT,
           typename DeviceStealerT,
           typename LambdaT>
-void launchKernel(const GraphT& graph,
+void launchKernel(const GraphT& graph,  // TODO fix according to the ClusterQueue
                   InputFrontierT& input_frontier,
                   clutra::frontier::FrontierMLB<>* output_frontier,
                   const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer,
@@ -67,6 +68,10 @@ void launchKernel(const GraphT& graph,
       clutra::detail::kernels::adjustLaunchConfig(grid_size, block_size, cluster_size, work_tiles, stealer);
 
   const size_t total_iters = (work_tiles + launch_config.grid_size - 1) / launch_config.grid_size;
+  const uint32_t num_clusters = static_cast<uint32_t>(launch_config.grid_size / launch_config.cluster_size);
+  const uint32_t tiles_per_cluster =
+      static_cast<uint32_t>(work_tiles == 0 ? 1 : (work_tiles + num_clusters - 1) / num_clusters);
+  clutra::detail::utils::ClusterWorkQueues<uint32_t> work_queues(num_clusters, tiles_per_cluster);
 
   clutra::detail::log("Advance Operator Launch - Active Size: {}, Direction: {}, Grid Size: {} (was {}), Block Size: "
                       "{}, Cluster Size: {}, SMEM: {}, Stealing Enabled: {}",
@@ -83,17 +88,17 @@ void launchKernel(const GraphT& graph,
     auto& kernel_launch_function =
         detail::advanceKernel<view::frontier, Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier),
                               decltype(out_dev_frontier), decltype(stealer_dev), LambdaT>;
-    clutra::detail::kernels::launchClusterKernel(launch_config, kernel_launch_function, graph_dev, in_dev_frontier,
-                                                 out_dev_frontier, coarsening_factor, total_iters, stealer_dev,
-                                                 std::forward<LambdaT>(functor));
+    clutra::detail::kernels::launchClusterKernel(
+        launch_config, kernel_launch_function, graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor,
+        total_iters, work_queues.deviceViews(), stealer_dev, std::forward<LambdaT>(functor));
   } else {
     // Use a null frontier when the caller does not need to store output.
     auto& kernel_launch_function =
         detail::advanceKernel<view::frontier, Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier),
                               frontier::detail::NullFrontierDevice, decltype(stealer_dev), LambdaT>;
-    clutra::detail::kernels::launchClusterKernel(launch_config, kernel_launch_function, graph_dev, in_dev_frontier,
-                                                 frontier::detail::NullFrontierDevice{}, coarsening_factor, total_iters,
-                                                 stealer_dev, std::forward<LambdaT>(functor));
+    clutra::detail::kernels::launchClusterKernel(
+        launch_config, kernel_launch_function, graph_dev, in_dev_frontier, frontier::detail::NullFrontierDevice{},
+        coarsening_factor, total_iters, work_queues.deviceViews(), stealer_dev, std::forward<LambdaT>(functor));
   }
 
   CUDA_CHECK(cudaDeviceSynchronize());
@@ -134,7 +139,9 @@ void launchKernel(const GraphT& graph,
   auto launch_config =
       clutra::detail::kernels::adjustLaunchConfig(grid_size, block_size, cluster_size, work_tiles, stealer);
 
-  const size_t total_iters = (work_tiles + launch_config.grid_size - 1) / launch_config.grid_size;
+  const size_t num_clusters = launch_config.grid_size / launch_config.cluster_size;
+  const size_t tiles_per_cluster = work_tiles == 0 ? 1 : (work_tiles + num_clusters - 1) / num_clusters;
+  clutra::detail::utils::ClusterWorkQueues<uint32_t> work_queues(num_clusters, tiles_per_cluster);
 
   clutra::detail::log("Advance Operator Launch - Active Size: {}, Direction: Push, Grid Size: {} (was {}), Block Size: "
                       "{}, Cluster Size: {}, SMEM: {}, Stealing Enabled: {}",
@@ -150,9 +157,9 @@ void launchKernel(const GraphT& graph,
     auto& kernel_launch_function = detail::advanceKernel<view::graph, Direction, CU_SIZE, decltype(graph_dev),
                                                          frontier::detail::NullFrontierDevice,
                                                          decltype(out_dev_frontier), decltype(stealer_dev), LambdaT>;
-    clutra::detail::kernels::launchClusterKernel(launch_config, kernel_launch_function, graph_dev,
-                                                 frontier::detail::NullFrontierDevice{}, out_dev_frontier, 1,
-                                                 total_iters, stealer_dev, std::forward<LambdaT>(functor));
+    clutra::detail::kernels::launchClusterKernel(
+        launch_config, kernel_launch_function, graph_dev, frontier::detail::NullFrontierDevice{}, out_dev_frontier, 1,
+        work_tiles, work_queues.deviceViews(), stealer_dev, std::forward<LambdaT>(functor));
   } else {
     // Use a null frontier when the caller does not need to store output.
     auto& kernel_launch_function =
@@ -161,7 +168,8 @@ void launchKernel(const GraphT& graph,
                               decltype(stealer_dev), LambdaT>;
     clutra::detail::kernels::launchClusterKernel(
         launch_config, kernel_launch_function, graph_dev, frontier::detail::NullFrontierDevice{},
-        frontier::detail::NullFrontierDevice{}, 1, total_iters, stealer_dev, std::forward<LambdaT>(functor));
+        frontier::detail::NullFrontierDevice{}, 1, work_tiles, work_queues.deviceViews(), stealer_dev,
+        std::forward<LambdaT>(functor));
   }
 
   CUDA_CHECK(cudaDeviceSynchronize());
