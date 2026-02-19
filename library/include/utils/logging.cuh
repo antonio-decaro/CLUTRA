@@ -8,14 +8,12 @@
 
 namespace clutra::detail {
 
-template<typename... Args>
+template <typename... Args>
 inline void log(std::string_view message, Args&&... args) {
   if (std::getenv("CLUTRA_LOGGING") == nullptr) {
     return;
   }
 
-  std::cerr << "\x1b[35m"
-            << fmt::format(fmt::runtime(message), std::forward<Args>(args)...)
-            << "\x1b[0m" << std::endl;
+  std::cerr << "\x1b[35m" << fmt::format(fmt::runtime(message), std::forward<Args>(args)...) << "\x1b[0m" << std::endl;
 }
-} // namespace clutra::detail
+}  // namespace clutra::detail

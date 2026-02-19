@@ -11,6 +11,7 @@
 *.obj
 *.out
 build/
+*.err
 
 # Ignore logs and temporary files
 *.log

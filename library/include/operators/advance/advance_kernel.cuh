@@ -198,11 +198,25 @@ size_t getAdvanceSharedMemorySize(size_t stealer_shared_size) {
 template <typename WorkQueue>
 __device__ __forceinline__ void populateClusterQueue(WorkQueue& cluster_queue, size_t work_tiles) {
   if (threadIdx.x == 0) {
-    for (int i = blockIdx.x; i < work_tiles; i += gridDim.x) {
+#if __CUDA_ARCH__ >= 900
+    auto cluster = cooperative_groups::this_cluster();
+    if (cluster.block_rank() == 0) {
+      const uint32_t cluster_size = static_cast<uint32_t>(cluster.dim_blocks().x);
+      const uint32_t cluster_idx = static_cast<uint32_t>(blockIdx.x / cluster_size);
+      const uint32_t num_clusters = static_cast<uint32_t>(gridDim.x / cluster_size);
+      for (uint32_t i = cluster_idx; i < work_tiles; i += num_clusters) {
+        cluster_queue.push(i);
+      }
+    }
+#else
+    for (uint32_t i = static_cast<uint32_t>(blockIdx.x); i < work_tiles; i += static_cast<uint32_t>(gridDim.x)) {
       cluster_queue.push(i);
     }
+#endif
   }
+#if __CUDA_ARCH__ >= 900
   cooperative_groups::this_cluster().sync();
+#endif
 }
 
 template <view View,
