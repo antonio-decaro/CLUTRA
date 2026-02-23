@@ -59,10 +59,8 @@ inline CLIHandles configureBaseCLI(CLI::App& app, Options& opts) {
   app.add_flag("-u,--undirected", opts.undirected, "Treat input COO as an undirected graph");
   handles.cluster_size_opt = app.add_option("-c,--cluster-size", opts.cluster_size, "Set the cluster size for intra-cluster work stealing (default: 4)");
   handles.cluster_size_opt->check(CLI::Range(1, 8));
-  handles.stealing_opt = app.add_flag("-t,--stealing", opts.local_stealing, "Enable local (intra-cluster) work stealing in the advance operator");
-  handles.global_stealing_opt = app.add_flag("-g,--global-stealing", opts.global_stealing, "Enable global stealing (implies local + inter-cluster stealing)");
-  handles.stealing_opt->excludes(handles.global_stealing_opt);
-  handles.global_stealing_opt->excludes(handles.stealing_opt);
+  handles.stealing_opt = app.add_flag("-t,--local-stealing", opts.local_stealing, "Enable local (intra-cluster) work stealing in the advance operator");
+  handles.global_stealing_opt = app.add_flag("-g,--global-stealing", opts.global_stealing, "Enable global stealing (inter-cluster stealing)");
   handles.stealing_chunk_size_opt = app.add_option(
       "--chunk-size",
       opts.stealing_chunk_size,
