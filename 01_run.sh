@@ -43,7 +43,7 @@ soc-LiveJournal1:47,171,321,507,732,1001,1305,1612,1943,2263,2583,2912,3243,3571
 soc-twitter-2010:1138,1535,2316,4326,6573,10395,13713,17612,20125,23378,26350,29761,32912,36645,39827,42813,46226,49187,52310,56726;\
 "
 DATASET="hollywood-2009;soc-orkut;indochina-2004;soc-LiveJournal1;roadNet-CA;road_usa;soc-orkut;kron_g500-logn21;com-friendster;uk-2002;uk-2005;europe_osm;it-2004;webbase-2001;sk-2005"
-# DATASET="uk-2002;uk-2005;europe_osm;it-2004;webbase-2001;sk-2005"
+# DATASET="soc-twitter-2010"
 
 function print_usage {
   echo "Usage: $0 <benchmark> [args...]"
