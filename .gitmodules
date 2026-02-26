@@ -1,0 +1,4 @@
+[submodule "frameworks/gunrock"]
+	path = frameworks/gunrock
+	url = https://github.com/gunrock/gunrock.git
+	branch = develop

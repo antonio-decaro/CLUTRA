@@ -4,6 +4,9 @@
 SCRIPT_DIR="$1"
 shift
 
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_PATH/utilities.sh"
+
 BENCHMARKS="measure_imbalance,triangle_counting"
 dataset_folder=""
 dataset_list=""
@@ -65,44 +68,10 @@ then
   exit 1
 fi
 
-IFS=';' read -r -a datasets_array <<< "$dataset_list"
+datasets_array=()
+resolve_datasets "$dataset_folder" "$dataset_list" datasets_array dataset_sources
 
-if [ ${#datasets_array[@]} -ne 0 ]
-then
-  parsed_datasets=()
-  for entry in "${datasets_array[@]}"
-  do
-    if [ -z "$entry" ]; then
-      continue
-    fi
-    if [[ "$entry" == *:* ]]; then
-      dataset="${entry%%:*}"
-      sources="${entry#*:}"
-      parsed_datasets+=("$dataset")
-      if [ -n "$sources" ]; then
-        dataset_sources["$dataset"]="$sources"
-      fi
-    else
-      parsed_datasets+=("$entry")
-    fi
-  done
-  datasets_array=("${parsed_datasets[@]}")
-fi
-
-if [ ${#datasets_array[@]} -eq 0 ]
-then
-  # If no datasets specified, use all datasets in the folder, ignore the folder that starts with _
-  for dir in "$dataset_folder"/*/
-  do
-    dir=${dir%*/}
-    if [[ "${dir##*/}" == _* ]]; then
-      continue
-    fi
-    datasets_array+=("${dir##*/}")
-  done
-fi
-
-mkdir -p "$out_dir"
+ensure_directory "$out_dir"
 
 for dataset in "${datasets_array[@]}"
 do

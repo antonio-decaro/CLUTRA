@@ -42,8 +42,8 @@ indochina-2004:56926,86450,148030,154316,155498,176597,182178,291167,328383,3596
 soc-LiveJournal1:47,171,321,507,732,1001,1305,1612,1943,2263,2583,2912,3243,3571,3899,4227,4556,4885,5214,5543;\
 soc-twitter-2010:1138,1535,2316,4326,6573,10395,13713,17612,20125,23378,26350,29761,32912,36645,39827,42813,46226,49187,52310,56726;\
 "
-DATASET="hollywood-2009;soc-orkut;indochina-2004;soc-LiveJournal1;roadNet-CA;road_usa;soc-orkut;kron_g500-logn21;com-friendster;uk-2002;uk-2005;europe_osm;it-2004;webbase-2001;sk-2005"
-# DATASET="soc-twitter-2010"
+DATASET="hollywood-2009;soc-orkut;indochina-2004;soc-LiveJournal1;roadNet-CA;road_usa;soc-orkut;kron_g500-logn21;com-Friendster;uk-2002;uk-2005;europe_osm;it-2004;webbase-2001;sk-2005"
+# DATASET="roadNet-CA"
 
 function print_usage {
   echo "Usage: $0 <benchmark> [args...]"
@@ -96,6 +96,11 @@ case "$benchmark" in
   *benchmark)
     target_script="$SCRIPT_DIR/scripts/run_benchmark.sh"
     bash "$target_script" $SCRIPT_DIR "$@"
+    exit $?
+    ;;
+  *sota)
+    target_script="$SCRIPT_DIR/scripts/run_sota.sh"
+    bash "$target_script" $SCRIPT_DIR -f $dataset_folder -d $DATASET -b gunrock  "$@"
     exit $?
     ;;
   *)

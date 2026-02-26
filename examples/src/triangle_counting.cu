@@ -7,10 +7,14 @@
 template <typename DeviceGraphT>
 struct MergePathsFunctor {
   DeviceGraphT graph_dev;
+  bool directed;
   int* edges;
 
   template <typename U, typename V, typename E, typename W>
   __device__ bool operator()(U u, V v, E e, W w) const {
+    if (!directed && u >= v) {
+      return false;  // Process each edge only once
+    }
     auto src_it = graph_dev.begin(u);
     auto src_end = graph_dev.end(u);
     auto dst_it = graph_dev.begin(v);
@@ -34,6 +38,7 @@ struct MergePathsFunctor {
 template <typename DeviceGraphT>
 struct BinarySearchFunctor {
   DeviceGraphT graph_dev;
+  bool directed;
   int* edges;
 
   template <typename U, typename V, typename E, typename W>
@@ -164,11 +169,12 @@ int main(int argc, char** argv) {
   cudaMalloc(&edges, sizeof(int) * graph.getVertexCount());
   cudaMemset(edges, 0, sizeof(int) * graph.getVertexCount());
 
+  bool directed = graph.getProperties().directed;
   std::cout << "[*] Running TC with method: " << tc_method << std::endl;
   if (tc_method == "binary") {
-    clutra::operators::advance::graph(graph, stealer, BinarySearchFunctor{graph_dev, edges});
+    clutra::operators::advance::graph(graph, stealer, BinarySearchFunctor{graph_dev, directed, edges});
   } else {
-    clutra::operators::advance::graph(graph, stealer, MergePathsFunctor{graph_dev, edges});
+    clutra::operators::advance::graph(graph, stealer, MergePathsFunctor{graph_dev, directed, edges});
   }
 
   clutra::profile::KernelProfiler profiler("reduce_triangles");
