@@ -255,15 +255,10 @@ tryGlobalClusterSteal(clutra::detail::utils::WorkQueueView<uint32_t, LockType>& 
         if (victim == my_cluster) {
           continue;
         }
-        int stolen = 0;
-        for (int t = 0; t < requested; ++t) {
-          uint32_t stolen_tile = 0;
-          if (!cluster_work_queues[victim].popFromTail(stolen_tile)) {
-            break;
-          }
-          local_cluster_queue.push(stolen_tile);
-          ++stolen;
-        }
+        const int stolen = cluster_work_queues[victim].popChunkFromTail(local_cluster_queue.data, requested);
+        local_cluster_queue.setTail(stolen);
+        local_cluster_queue.setHead(0);
+
         if (stolen > 0) {
           stole_any = true;
           next_cursor = (victim + 1U) % num_clusters;
@@ -278,10 +273,10 @@ tryGlobalClusterSteal(clutra::detail::utils::WorkQueueView<uint32_t, LockType>& 
       next_cursor = 0;
     }
     *steal_state_ptr = (stole_any ? STEAL_SUCCESS_MASK : 0U) | (next_cursor & CURSOR_MASK);
-    if (stole_any) {
-      printf("Stealing performed by %d, cluster %d, stolen %d\n", blockIdx.x,
-             static_cast<int>(blockIdx.x / cluster.dim_blocks().x), total_stolen);
-    }
+    // if (stole_any) {
+    //   printf("Stealing performed by %d, cluster %d, stolen %lu\n", blockIdx.x,
+    //          static_cast<int>(blockIdx.x / cluster.dim_blocks().x), static_cast<unsigned long>(total_stolen));
+    // }
   }
 
   cluster.sync();

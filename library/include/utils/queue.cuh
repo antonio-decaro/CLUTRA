@@ -64,6 +64,10 @@ struct WorkQueueView {
   LockType* lock;
   uint32_t capacity;
 
+  __device__ __forceinline__ void setHead(uint32_t new_head) { *head = new_head; }
+
+  __device__ __forceinline__ void setTail(uint32_t new_tail) { *tail = new_tail; }
+
   __device__ __forceinline__ void push(const T& item) {
     lock->acquire();
     const auto pos = *tail;
