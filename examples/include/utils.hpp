@@ -11,8 +11,8 @@
 #include <optional>
 #include <random>
 #include <string>
-#include <vector>
 #include <unistd.h>
+#include <vector>
 
 #include <cuda_runtime.h>
 
@@ -57,19 +57,18 @@ inline CLIHandles configureBaseCLI(CLI::App& app, Options& opts) {
   app.add_flag("-v,--validate", opts.validate, "Validate algorithm output against CPU implementation");
   app.add_flag("-D,--detail", opts.profiling_detail, "Print detailed profiling info (per-event timings)");
   app.add_flag("-u,--undirected", opts.undirected, "Treat input COO as an undirected graph");
-  handles.cluster_size_opt = app.add_option("-c,--cluster-size", opts.cluster_size, "Set the cluster size for intra-cluster work stealing (default: 4)");
+  handles.cluster_size_opt = app.add_option("-c,--cluster-size", opts.cluster_size,
+                                            "Set the cluster size for intra-cluster work stealing (default: 4)");
   handles.cluster_size_opt->check(CLI::Range(1, 8));
-  handles.stealing_opt = app.add_flag("-t,--local-stealing", opts.local_stealing, "Enable local (intra-cluster) work stealing in the advance operator");
-  handles.global_stealing_opt = app.add_flag("-g,--global-stealing", opts.global_stealing, "Enable global stealing (inter-cluster stealing)");
-  handles.stealing_chunk_size_opt = app.add_option(
-      "--chunk-size",
-      opts.local_stealing_chunk_size,
-      "Set the local stealing chunk size");
+  handles.stealing_opt = app.add_flag("-t,--local-stealing", opts.local_stealing,
+                                      "Enable local (intra-cluster) work stealing in the advance operator");
+  handles.global_stealing_opt =
+      app.add_flag("-g,--global-stealing", opts.global_stealing, "Enable global stealing (inter-cluster stealing)");
+  handles.stealing_chunk_size_opt =
+      app.add_option("--chunk-size", opts.local_stealing_chunk_size, "Set the local stealing chunk size");
   handles.stealing_chunk_size_opt->check(CLI::PositiveNumber);
   handles.global_stealing_chunk_size_opt = app.add_option(
-      "--gchunk-size,--global-chunk-size",
-      opts.global_stealing_chunk_size,
-      "Set the global stealing chunk size");
+      "--gchunk-size,--global-chunk-size", opts.global_stealing_chunk_size, "Set the global stealing chunk size");
   handles.global_stealing_chunk_size_opt->check(CLI::PositiveNumber);
 
   handles.source_opt = app.add_option("-s,--source", opts.source, "Specify the source vertex");
@@ -86,15 +85,13 @@ inline void finalizeGraphOptions(Options& opts, const CLIHandles& handles) {
   } else {
     opts.random_source = true;
   }
-  opts.local_stealing =
-      (handles.stealing_opt && handles.stealing_opt->count() > 0);
-  opts.global_stealing =
-      (handles.global_stealing_opt && handles.global_stealing_opt->count() > 0);
+  opts.local_stealing = (handles.stealing_opt && handles.stealing_opt->count() > 0);
+  opts.global_stealing = (handles.global_stealing_opt && handles.global_stealing_opt->count() > 0);
 }
 
 inline clutra::stealer::StealerConfig getStealingConfig(const Options& opts) {
   clutra::stealer::StealerConfig config{};
-  config.intra_cluster_stealing_enabled = opts.local_stealing; 
+  config.intra_cluster_stealing_enabled = opts.local_stealing;
   config.inter_cluster_stealing_enabled = opts.global_stealing;
   if (opts.local_stealing_chunk_size.has_value()) {
     config.local_stealing_chunk_size = *opts.local_stealing_chunk_size;
@@ -102,15 +99,17 @@ inline clutra::stealer::StealerConfig getStealingConfig(const Options& opts) {
   if (opts.global_stealing_chunk_size.has_value()) {
     config.global_stealing_chunk_size = *opts.global_stealing_chunk_size;
   } else if (opts.local_stealing_chunk_size.has_value()) {
-    // If global stealing chunk size is not set but local stealing chunk size is, use the same chunk size for global stealing
+    // If global stealing chunk size is not set but local stealing chunk size is, use the same chunk size for global
+    // stealing
     config.global_stealing_chunk_size = opts.cluster_size;
   }
   config.preferred_cluster_size = opts.cluster_size;
   return config;
 }
 
-template<typename ValueT, typename IndexT, typename OffsetT>
-clutra::formats::CSR<ValueT, IndexT, OffsetT> readCSR(const Options& opts, clutra::graph::Properties* properties = nullptr) {
+template <typename ValueT, typename IndexT, typename OffsetT>
+clutra::formats::CSR<ValueT, IndexT, OffsetT> readCSR(const Options& opts,
+                                                      clutra::graph::Properties* properties = nullptr) {
   clutra::formats::CSR<ValueT, IndexT, OffsetT> csr;
   clutra::graph::Properties local_properties;
   auto* props = properties ? properties : &local_properties;
@@ -130,7 +129,7 @@ clutra::formats::CSR<ValueT, IndexT, OffsetT> readCSR(const Options& opts, clutr
   return csr;
 }
 
-template<typename T>
+template <typename T>
 void printFrontier(const T& frontier, std::string prefix = "") {
   using bitmap_type = typename T::bitmap_type;
   const auto words = frontier.getBitmapSize();
@@ -139,7 +138,8 @@ void printFrontier(const T& frontier, std::string prefix = "") {
     return;
   }
   std::vector<bitmap_type> host(words);
-  CUDA_CHECK(cudaMemcpy(host.data(), frontier.getDeviceFrontier().getData(), words * sizeof(bitmap_type), cudaMemcpyDeviceToHost));
+  CUDA_CHECK(cudaMemcpy(host.data(), frontier.getDeviceFrontier().getData(), words * sizeof(bitmap_type),
+                        cudaMemcpyDeviceToHost));
   const auto range = frontier.getBitmapRange();
   std::cout << prefix;
   for (int bit = static_cast<int>(words * range) - 1; bit >= 0; --bit) {
@@ -158,7 +158,7 @@ inline size_t getRandomSource(size_t size) {
   return dis(gen);
 }
 
-template<typename GraphT>
+template <typename GraphT>
 void printGraphInfo(const GraphT& g, bool header = true, bool footer = true) {
   if (header) {
     std::cerr << "-----------------------------------" << std::endl;
@@ -166,28 +166,31 @@ void printGraphInfo(const GraphT& g, bool header = true, bool footer = true) {
   std::cerr << std::left;
   std::cerr << std::setw(17) << "Vertex count:" << std::setw(10) << g.getVertexCount() << std::endl;
   std::cerr << std::setw(17) << "Edge count:" << std::setw(10) << g.getEdgeCount() << std::endl;
-  std::cerr << std::setw(17) << "Average degree:" << std::setw(10) << g.getEdgeCount() / g.getVertexCount() << std::endl;
-  std::cerr << std::setw(17) << "Directed:" << std::setw(10) << (g.getProperties().directed ? "yes" : "no") << std::endl;
+  std::cerr << std::setw(17) << "Average degree:" << std::setw(10) << g.getEdgeCount() / g.getVertexCount()
+            << std::endl;
+  std::cerr << std::setw(17) << "Directed:" << std::setw(10) << (g.getProperties().directed ? "yes" : "no")
+            << std::endl;
   if (footer) {
     std::cerr << "-----------------------------------" << std::endl;
   }
 }
 
-inline void printStealingOptions(const Options& opts, bool header = true, bool footer = true) {
+inline void printStealingOptions(const clutra::stealer::StealerConfig& config, bool header = true, bool footer = true) {
   if (header) {
     std::cerr << "-----------------------------------" << std::endl;
   }
   std::cerr << std::left;
-  std::cerr << std::setw(26) << "Local stealing:" << std::setw(10) << (opts.local_stealing ? "yes" : "no") << std::endl;
-  std::cerr << std::setw(26) << "Global stealing:" << std::setw(10) << (opts.global_stealing ? "yes" : "no") << std::endl;
+  std::cerr << std::setw(26) << "Local stealing:" << std::setw(10)
+            << (config.intra_cluster_stealing_enabled ? "yes" : "no") << std::endl;
+  std::cerr << std::setw(26) << "Global stealing:" << std::setw(10)
+            << (config.inter_cluster_stealing_enabled ? "yes" : "no") << std::endl;
   std::cerr << std::setw(26) << "Local chunk size:" << std::setw(10)
-            << (opts.local_stealing_chunk_size.has_value() ? std::to_string(*opts.local_stealing_chunk_size) : "default")
+            << (config.intra_cluster_stealing_enabled ? std::to_string(config.local_stealing_chunk_size) : "ignored")
             << std::endl;
   std::cerr << std::setw(26) << "Global chunk size:" << std::setw(10)
-            << (opts.global_stealing_chunk_size.has_value() ? std::to_string(*opts.global_stealing_chunk_size)
-                                                            : "default")
+            << (config.inter_cluster_stealing_enabled ? std::to_string(config.global_stealing_chunk_size) : "ignored")
             << std::endl;
-  std::cerr << std::setw(26) << "Cluster size:" << std::setw(10) << opts.cluster_size << std::endl;
+  std::cerr << std::setw(26) << "Cluster size:" << std::setw(10) << config.preferred_cluster_size << std::endl;
   if (footer) {
     std::cerr << "-----------------------------------" << std::endl;
   }
@@ -198,26 +201,31 @@ inline void printDeviceInfo(std::string prefix = "") {
   cudaGetDevice(&device_id);
   cudaDeviceProp device_prop;
   cudaGetDeviceProperties(&device_prop, device_id);
-  std::cerr << prefix << "Using device " << device_id << ": " << device_prop.name << " with " << device_prop.totalGlobalMem / (1024 * 1024)
-            << " MB of global memory." << std::endl;
+  std::cerr << prefix << "Using device " << device_id << ": " << device_prop.name << " with "
+            << device_prop.totalGlobalMem / (1024 * 1024) << " MB of global memory." << std::endl;
 }
 
-inline bool isConsoleOutput() { return static_cast<int>(static_cast<int>(isatty(STDOUT_FILENO) != 0)) != 0; }
+inline bool isConsoleOutput() {
+  return static_cast<int>(static_cast<int>(isatty(STDOUT_FILENO) != 0)) != 0;
+}
 
 inline std::string successString() {
-  if (!isConsoleOutput()) { return "Success"; }
+  if (!isConsoleOutput()) {
+    return "Success";
+  }
   return "\033[1;32mSuccess\033[0m";
 }
 
 inline std::string failString() {
-  if (!isConsoleOutput()) { return "Failed"; }
+  if (!isConsoleOutput()) {
+    return "Failed";
+  }
   return "\033[1;31mFailed\033[0m";
 }
 
-bool checkOrderedCSR(
-    const clutra::formats::CSR<float, uint32_t, uint32_t> &csr) {
-  const auto &row_offsets = csr.getRowOffsets();
-  const auto &col_indices = csr.getColumnIndices();
+bool checkOrderedCSR(const clutra::formats::CSR<float, uint32_t, uint32_t>& csr) {
+  const auto& row_offsets = csr.getRowOffsets();
+  const auto& col_indices = csr.getColumnIndices();
 
   const size_t vertex_count = row_offsets.size() - 1;
 
@@ -233,10 +241,10 @@ bool checkOrderedCSR(
   return true;
 }
 
-void sortCSR(clutra::formats::CSR<float, uint32_t, uint32_t> &csr) {
-  const auto &row_offsets = csr.getRowOffsets();
-  auto &col_indices = csr.getColumnIndices();
-  auto &values = csr.getValues();
+void sortCSR(clutra::formats::CSR<float, uint32_t, uint32_t>& csr) {
+  const auto& row_offsets = csr.getRowOffsets();
+  auto& col_indices = csr.getColumnIndices();
+  auto& values = csr.getValues();
 
   const size_t vertex_count = row_offsets.size() - 1;
 
@@ -253,8 +261,7 @@ void sortCSR(clutra::formats::CSR<float, uint32_t, uint32_t> &csr) {
     // Sort the neighbors based on col_index
     std::sort(
         neighbors.begin(), neighbors.end(),
-        [](const std::pair<uint32_t, float> &a,
-           const std::pair<uint32_t, float> &b) { return a.first < b.first; });
+        [](const std::pair<uint32_t, float>& a, const std::pair<uint32_t, float>& b) { return a.first < b.first; });
 
     // Write back the sorted neighbors
     for (size_t idx = start; idx < end; ++idx) {

@@ -113,6 +113,8 @@ size_t validate(const GraphT& graph) {
     const auto u_end = row_offsets[u + 1];
     for (size_t e = u_start; e < u_end; ++e) {
       const auto v = col_indices[e];
+      if (u >= v)
+        continue;
       const auto v_start = row_offsets[v];
       const auto v_end = row_offsets[v + 1];
       auto u_it = u_start;
@@ -156,11 +158,12 @@ int main(int argc, char** argv) {
   }
   std::cerr << "[*] CSR sorted" << std::endl;
   std::cerr << "[*] CSR Building Graph" << std::endl;
+
   auto graph = clutra::graph::createGraph(csr, properties);
   printGraphInfo(graph);
-  printStealingOptions(opts, false);
 
   auto stealer_config = getStealingConfig(opts);
+  printStealingOptions(stealer_config, false);
   clutra::stealer::BasicStealer stealer(stealer_config);
 
   auto graph_dev = graph.getDeviceGraph();
