@@ -28,7 +28,13 @@ public:
 
   __host__ bool isIntraClusterStealingEnabled() const { return _config.intra_cluster_stealing_enabled; }
 
+  __host__ bool isInterClusterStealingEnabled() const { return _config.inter_cluster_stealing_enabled; }
+
   __host__ int getPreferredClusterSize() const { return _config.preferred_cluster_size; }
+
+  __host__ int getLocalStealingChunkSize() const { return _config.local_stealing_chunk_size; }
+
+  __host__ int getGlobalStealingChunkSize() const { return _config.global_stealing_chunk_size; }
 
   template <size_t BlockSize>
   __host__ size_t getSharedStateSizeInBytes() const {

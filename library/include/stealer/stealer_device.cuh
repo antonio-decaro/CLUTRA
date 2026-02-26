@@ -23,7 +23,9 @@ struct StealerDevice {
   /**
    * @brief Returns true if intra-cluster stealing is enabled and available.
    */
-  __forceinline__ __device__ bool isStealingEnabled() const { return config.intra_cluster_stealing_enabled; }
+  __forceinline__ __device__ bool isIntraClusterStealingEnabled() const {
+    return config.intra_cluster_stealing_enabled;
+  }
 
   /**
    * @brief Returns the preferred cluster size for stealing.
@@ -33,7 +35,19 @@ struct StealerDevice {
   /**
    * @brief Returns the stealing chunk size.
    */
-  __forceinline__ __device__ int getStealingChunkSize() const { return config.stealing_chunk_size; }
+  __forceinline__ __device__ int getLocalStealingChunkSize() const { return config.local_stealing_chunk_size; }
+
+  /**
+   * @brief Returns true if inter-cluster stealing is enabled.
+   */
+  __forceinline__ __device__ bool isInterClusterStealingEnabled() const {
+    return config.inter_cluster_stealing_enabled;
+  }
+
+  /**
+   * @brief Returns the global stealing chunk size.
+   */
+  __forceinline__ __device__ int getGlobalStealingChunkSize() const { return config.global_stealing_chunk_size; }
 
   template <size_t BlockSize>
   /**

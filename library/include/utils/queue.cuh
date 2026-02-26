@@ -65,8 +65,11 @@ struct WorkQueueView {
   uint32_t capacity;
 
   __device__ __forceinline__ void push(const T& item) {
-    auto pos = atomicAdd(tail, 1U);
+    lock->acquire();
+    const auto pos = *tail;
     data[pos % capacity] = item;
+    (*tail)++;
+    lock->release();
   }
 
   __device__ __forceinline__ bool pop(T& out) {
@@ -76,11 +79,52 @@ struct WorkQueueView {
       return false;  // empty
     }
     auto pos = *head;
+    out = data[pos % capacity];
     (*head)++;
     lock->release();
-    out = data[pos % capacity];
 
     return true;
+  }
+
+  __device__ __forceinline__ int popChunkFromTail(T* out, int requested) {
+    if (requested <= 0) {
+      return 0;
+    }
+    lock->acquire();
+    if (*head >= *tail) {
+      lock->release();
+      return 0;
+    }
+
+    const int available = static_cast<int>(*tail - *head);
+    const int take = requested < available ? requested : available;
+    const uint32_t start = *tail - static_cast<uint32_t>(take);
+    for (int i = 0; i < take; ++i) {
+      out[i] = data[(start + static_cast<uint32_t>(i)) % capacity];
+    }
+    *tail = start;
+    lock->release();
+    return take;
+  }
+
+  __device__ __forceinline__ bool popFromTail(T& out) {
+    lock->acquire();
+    if (*head >= *tail) {
+      lock->release();
+      return false;
+    }
+    const uint32_t pos = *tail - 1U;
+    out = data[pos % capacity];
+    *tail = pos;
+    lock->release();
+    return true;
+  }
+
+  __device__ __forceinline__ uint32_t size() const {
+    lock->acquire();
+    const uint32_t cur_size = *tail - *head;
+    lock->release();
+    return cur_size;
   }
 
   __device__ __forceinline__ bool steal(T& out) { return false; }

@@ -168,7 +168,8 @@ runLocalStealLoop(GraphDevT graph_dev,
                   int tid,
                   int block_dim) {
   while (true) {
-    const int steal_count = stealer.template attemptStealing<BlockSize>(stealer_state, stealer.getStealingChunkSize());
+    const int steal_count =
+        stealer.template attemptStealing<BlockSize>(stealer_state, stealer.getLocalStealingChunkSize());
     if (steal_count == 0) {
       break;
     }
@@ -219,6 +220,83 @@ __device__ __forceinline__ void populateClusterQueue(WorkQueue& cluster_queue, s
 #endif
 }
 
+template <typename LockType, typename StealerDeviceT>
+__device__ __forceinline__ bool
+tryGlobalClusterSteal(clutra::detail::utils::WorkQueueView<uint32_t, LockType>& local_cluster_queue,
+                      clutra::detail::utils::WorkQueueView<uint32_t, LockType>* cluster_work_queues,
+                      StealerDeviceT stealer,
+                      uint32_t& steal_state) {
+#if __CUDA_ARCH__ >= 900
+  constexpr uint32_t STEAL_SUCCESS_MASK = 0x80000000U;
+  constexpr uint32_t CURSOR_MASK = 0x7FFFFFFFU;
+  auto cluster = cooperative_groups::this_cluster();
+  uint32_t* steal_state_ptr = cluster.map_shared_rank(&steal_state, 0);
+
+  if (cluster.block_rank() == 0 && threadIdx.x == 0) {
+    const uint32_t cluster_size = static_cast<uint32_t>(cluster.dim_blocks().x);
+    const uint32_t my_cluster = static_cast<uint32_t>(blockIdx.x) / cluster_size;
+    const uint32_t num_clusters = static_cast<uint32_t>(gridDim.x) / cluster_size;
+    uint32_t next_cursor = 0;
+    bool stole_any = false;
+    size_t total_stolen = 0;
+    if (num_clusters > 1) {
+      int requested = stealer.getGlobalStealingChunkSize();
+      if (requested < 1) {
+        requested = 1;
+      }
+
+      uint32_t start = (*steal_state_ptr) & CURSOR_MASK;
+      if (start >= num_clusters || start == my_cluster) {
+        start = (my_cluster + 1U) % num_clusters;
+      }
+
+      for (uint32_t i = 0; i < num_clusters - 1; ++i) {
+        const uint32_t victim = (start + i) % num_clusters;
+        if (victim == my_cluster) {
+          continue;
+        }
+        int stolen = 0;
+        for (int t = 0; t < requested; ++t) {
+          uint32_t stolen_tile = 0;
+          if (!cluster_work_queues[victim].popFromTail(stolen_tile)) {
+            break;
+          }
+          local_cluster_queue.push(stolen_tile);
+          ++stolen;
+        }
+        if (stolen > 0) {
+          stole_any = true;
+          next_cursor = (victim + 1U) % num_clusters;
+          total_stolen += stolen;
+          break;
+        }
+      }
+      if (!stole_any) {
+        next_cursor = (start + 1U) % num_clusters;
+      }
+    } else {
+      next_cursor = 0;
+    }
+    *steal_state_ptr = (stole_any ? STEAL_SUCCESS_MASK : 0U) | (next_cursor & CURSOR_MASK);
+    if (stole_any) {
+      printf("Stealing performed by %d, cluster %d, stolen %d\n", blockIdx.x,
+             static_cast<int>(blockIdx.x / cluster.dim_blocks().x), total_stolen);
+    }
+  }
+
+  cluster.sync();
+  const bool has_new_work = ((*steal_state_ptr & STEAL_SUCCESS_MASK) != 0U);
+  // cluster.sync();
+  return has_new_work;
+#else
+  (void)local_cluster_queue;
+  (void)cluster_work_queues;
+  (void)stealer;
+  (void)steal_state;
+  return false;
+#endif
+}
+
 template <view View,
           advance_direction Direction,
           size_t BlockSize,
@@ -247,9 +325,15 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   const int lane = tid & (ADVANCE_WARP_SIZE - 1);
   const int block_dim = blockDim.x;
   auto& warp_queue = warp_queues[warp_id];
-  auto cluster_queue = clutra::detail::utils::getCurrentClusterQueueView(cluster_work_queues);
+  auto& cluster_queue = clutra::detail::utils::getCurrentClusterQueueView(cluster_work_queues);
+  __shared__ uint32_t global_steal_state;
 
-  if (stealer.isStealingEnabled()) {
+  if (tid == 0) {
+    global_steal_state = 0;
+  }
+  __syncthreads();
+
+  if (stealer.isIntraClusterStealingEnabled()) {
     stealer.template init<BlockSize>(&cta_queue, stealer_state);
   }
 
@@ -260,7 +344,7 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   __shared__ uint32_t tile;
   while (true) {
     if (tid == 0 && !cluster_queue.pop(tile)) {
-      tile = UINT32_MAX;  // Mark tile as being processed
+      tile = UINT32_MAX;
     }
     __syncthreads();
     if (tile == UINT32_MAX) {
@@ -270,11 +354,33 @@ __global__ void advanceKernel(GraphDevT graph_dev,
                                             cta_queue, warp_queue, stealer, stealer_state, functor, tid, lane,
                                             block_dim);
   }
-  if (!stealer.isStealingEnabled()) {
-    return;
+  if (stealer.isIntraClusterStealingEnabled()) {
+    runLocalStealLoop<Direction, BlockSize>(graph_dev, out_dev_frontier, stealer, stealer_state, functor, tid,
+                                            block_dim);
   }
 
-  runLocalStealLoop<Direction, BlockSize>(graph_dev, out_dev_frontier, stealer, stealer_state, functor, tid, block_dim);
+  while (stealer.isInterClusterStealingEnabled()) {
+    const bool has_new_work = tryGlobalClusterSteal(cluster_queue, cluster_work_queues, stealer, global_steal_state);
+    if (!has_new_work) {
+      break;
+    }
+    while (true) {
+      if (tid == 0 && !cluster_queue.pop(tile)) {  // Short circuit if no tile to steal
+        tile = UINT32_MAX;
+      }
+      __syncthreads();
+      if (tile == UINT32_MAX) {
+        break;
+      }
+      processTile<View, Direction, BlockSize>(graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, tile,
+                                              cta_queue, warp_queue, stealer, stealer_state, functor, tid, lane,
+                                              block_dim);
+    }
+    if (stealer.isIntraClusterStealingEnabled()) {
+      runLocalStealLoop<Direction, BlockSize>(graph_dev, out_dev_frontier, stealer, stealer_state, functor, tid,
+                                              block_dim);
+    }
+  }
 
   stealer.template finalize<BlockSize>();
 }
@@ -298,7 +404,7 @@ __global__ void advanceKernel(GraphDevT graph_dev, size_t total_iters, StealerDe
   const int block_dim = blockDim.x;
   auto& warp_queue = warp_queues[warp_id];
 
-  if (stealer.isStealingEnabled()) {
+  if (stealer.isIntraClusterStealingEnabled()) {
     stealer.template init<BlockSize>(&cta_queue, stealer_state);
   }
 
@@ -352,12 +458,13 @@ __global__ void advanceKernel(GraphDevT graph_dev, size_t total_iters, StealerDe
     }
   }
 
-  if (!stealer.isStealingEnabled()) {
+  if (!stealer.isIntraClusterStealingEnabled()) {
     return;
   }
 
   while (true) {
-    const int steal_count = stealer.template attemptStealing<BlockSize>(stealer_state, stealer.getStealingChunkSize());
+    const int steal_count =
+        stealer.template attemptStealing<BlockSize>(stealer_state, stealer.getLocalStealingChunkSize());
     if (steal_count == 0) {
       break;
     }

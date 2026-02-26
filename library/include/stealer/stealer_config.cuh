@@ -20,7 +20,7 @@ struct StealerConfig final {
   bool intra_cluster_stealing_enabled = false;
   bool inter_cluster_stealing_enabled = false;
   int preferred_cluster_size = 4;
-  int stealing_chunk_size = 16;
+  int local_stealing_chunk_size = 16;
   int global_stealing_chunk_size = 16;
 };
 

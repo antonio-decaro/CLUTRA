@@ -74,10 +74,13 @@ void launchKernel(const GraphT& graph,  // TODO fix according to the ClusterQueu
   clutra::detail::utils::ClusterWorkQueues<uint32_t> work_queues(num_clusters, tiles_per_cluster);
 
   clutra::detail::log("Advance Operator Launch - Active Size: {}, Direction: {}, Grid Size: {} (was {}), Block Size: "
-                      "{}, Cluster Size: {}, SMEM: {}, Stealing Enabled: {}",
+                      "{}, Cluster Size: {}, SMEM: {}, Local Stealing: {}, Global Stealing: {}, Local Chunk: {}, "
+                      "Global Chunk: {}",
                       active_size, (Direction == advance_direction::push) ? "Push" : "Pull", launch_config.grid_size,
                       grid_size, launch_config.block_size, launch_config.cluster_size, smem,
-                      stealer.isIntraClusterStealingEnabled() ? "Yes" : "No");
+                      stealer.isIntraClusterStealingEnabled() ? "Yes" : "No",
+                      stealer.isInterClusterStealingEnabled() ? "Yes" : "No", stealer.getLocalStealingChunkSize(),
+                      stealer.getGlobalStealingChunkSize());
 
   // launch advance kernel
   clutra::profile::KernelProfiler profiler("advanceKernel", "core");
@@ -144,9 +147,12 @@ void launchKernel(const GraphT& graph,
   clutra::detail::utils::ClusterWorkQueues<uint32_t, LockType> work_queues(num_clusters, tiles_per_cluster);
 
   clutra::detail::log("Advance Operator Launch - Active Size: {}, Direction: Push, Grid Size: {} (was {}), Block Size: "
-                      "{}, Cluster Size: {}, SMEM: {}, Stealing Enabled: {}",
+                      "{}, Cluster Size: {}, SMEM: {}, Local Stealing: {}, Global Stealing: {}, Local Chunk: {}, "
+                      "Global Chunk: {}",
                       active_size, launch_config.grid_size, grid_size, launch_config.block_size,
-                      launch_config.cluster_size, smem, stealer.isIntraClusterStealingEnabled() ? "Yes" : "No");
+                      launch_config.cluster_size, smem, stealer.isIntraClusterStealingEnabled() ? "Yes" : "No",
+                      stealer.isInterClusterStealingEnabled() ? "Yes" : "No", stealer.getLocalStealingChunkSize(),
+                      stealer.getGlobalStealingChunkSize());
 
   // launch advance kernel
   clutra::profile::KernelProfiler profiler("advanceKernel", "core");
@@ -207,9 +213,11 @@ void launchEdgeKernel(const GraphT& graph,
   const size_t total_iters = (work_tiles + launch_config.grid_size - 1) / launch_config.grid_size;
 
   clutra::detail::log("Advance Edge Operator Launch - Edge Count: {}, Grid Size: {} (was {}), Block Size: {}, Cluster "
-                      "Size: {}, SMEM: {}, Stealing Enabled: {}",
+                      "Size: {}, SMEM: {}, Local Stealing: {}, Global Stealing: {}, Local Chunk: {}, Global Chunk: {}",
                       edge_count, launch_config.grid_size, grid_size, launch_config.block_size,
-                      launch_config.cluster_size, smem, stealer.isIntraClusterStealingEnabled() ? "Yes" : "No");
+                      launch_config.cluster_size, smem, stealer.isIntraClusterStealingEnabled() ? "Yes" : "No",
+                      stealer.isInterClusterStealingEnabled() ? "Yes" : "No", stealer.getLocalStealingChunkSize(),
+                      stealer.getGlobalStealingChunkSize());
 
   clutra::profile::KernelProfiler profiler("advanceKernelEdge", "core");
 
