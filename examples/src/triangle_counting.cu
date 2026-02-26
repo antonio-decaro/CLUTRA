@@ -135,7 +135,7 @@ size_t validate(const GraphT& graph) {
     }
   }
 
-  return cpu_triangles / 3;  // Each triangle is counted three times
+  return cpu_triangles;  // Each triangle is counted three times
 }
 
 int main(int argc, char** argv) {
@@ -183,7 +183,6 @@ int main(int argc, char** argv) {
   clutra::profile::KernelProfiler profiler("reduce_triangles");
   std::uint64_t device_triangles =
       thrust::reduce(thrust::device_ptr<int>(edges), thrust::device_ptr<int>(edges + graph.getVertexCount()), 0LL);
-  device_triangles /= 3;  // Each triangle is counted three times
   profiler.stop();
 
   std::cout << "[*] TC completed" << std::endl;
