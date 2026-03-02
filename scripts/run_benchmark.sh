@@ -42,7 +42,7 @@ do
     l) enable_stealing="-t";;
     g) enable_stealing="-g";;
     s) enable_stealing="-t -g";;
-    c) cluster_size="-c ${OPTARG}";;
+    c) cluster_size="-c ${OPTARG} --gchunk-size=${OPTARG}";;
     n) num_runs=${OPTARG};;
     o) out_dir=${OPTARG};;
     \?) echo "Invalid option: -${OPTARG}" >&2
