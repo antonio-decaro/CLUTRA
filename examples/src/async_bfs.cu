@@ -2,6 +2,7 @@
 #include <clutra.hpp>
 #include <cooperative_groups.h>
 #include <cuda.h>
+#include <cuda_runtime.h>
 #include <iostream>
 
 namespace cg = cooperative_groups;
@@ -47,17 +48,16 @@ bool validate(const GraphT& graph, const int* device_distances, const uint sourc
   return mismatches == 0;
 }
 
-template <size_t BlockSize>
-class LocalWorkQueue {
-public:
+template <size_t Size>
+struct LocalHotRing {
   __device__ bool empty() const { return head == tail; }
 
-  __device__ bool full() const { return ((tail + 1) % BlockSize) == head; }
+  __device__ bool full() const { return ((tail + 1) % Size) == head; }
 
   __device__ bool push(uint32_t value) {
     if (full())
       return false;
-    int pos = atomicAdd(&tail, 1) % BlockSize;
+    int pos = atomicAdd(&tail, 1) % Size;
     data[pos] = value;
     return true;
   }
@@ -65,15 +65,21 @@ public:
   __device__ bool pop(uint32_t& value) {
     if (empty())
       return false;
-    int pos = atomicAdd(&head, 1) % BlockSize;
+    int pos = atomicAdd(&head, 1) % Size;
     value = data[pos];
     return true;
   }
 
-private:
-  uint32_t data[BlockSize];
+  uint32_t data[Size];
   uint32_t head;
   uint32_t tail;
+};
+
+template <size_t Size, size_t BlockSize>
+struct CTAHotRings {
+  __device__ LocalHotRing<Size>& getHotRing(size_t warp_id) { return rings[warp_id]; }
+
+  LocalHotRing<Size> rings[BlockSize / 32];
 };
 
 class GlobalWorkQueue {
@@ -126,7 +132,7 @@ template <typename GraphDev, size_t BlockSize>
 __device__ void processVertex(uint32_t vertex,
                               const GraphDev& graph,
                               uint32_t* distances,
-                              LocalWorkQueue<BlockSize>& local_queue,
+                              LocalHotRing<BlockSize>& local_queue,
                               GlobalWorkQueue& global_queue,
                               size_t cluster_id) {
   auto start = graph.getRowOffsets()[vertex];
@@ -140,7 +146,7 @@ __device__ void processVertex(uint32_t vertex,
       distances[neighbor] = distances[vertex] + 1;
 
       // Try to push to local queue
-      if (!local_queue.push(neighbor)) {
+      if (!local_queue->push(neighbor)) {
         // Local queue is full, push to global queue
         auto lock = global_queue.getLock(cluster_id);
         lock->acquire();
@@ -153,40 +159,53 @@ __device__ void processVertex(uint32_t vertex,
   }
 }
 
+__device__ bool fetchFromColdBuffer(uint32_t& vertex) {
+  return true;
+}
+
 template <size_t BlockSize, typename GraphDev>
 __global__ void bfsKernel(GraphDev graph, uint32_t* distances, GlobalWorkQueue work_queue, uint32_t clusters) {
-  __shared__ LocalWorkQueue<BlockSize> local_queue;
-  __shared__ LocalWorkQueue<BlockSize>* local_queues[8];
+  __shared__ CTAHotRings<256, BlockSize> local_rings;
+  __shared__ CTAHotRings<256, BlockSize>* cluster_rings[8];
 
   constexpr uint32_t WARP_SIZE = 32;
+  constexpr uint32_t INVALID_VERTEX = UINT32_MAX;
   int tid = threadIdx.x;
   int gid = blockIdx.x * blockDim.x + tid;
   int lane = tid % WARP_SIZE;
   int warp_id = tid / WARP_SIZE;
   auto cluster = cg::this_cluster();
   int cluster_id = blockIdx.x / cluster.dim_blocks().x;
+  auto& warp_ring = local_rings.getHotRing(warp_id);
 
   // Initialize local queues
   cluster.sync();
   if (tid == 0) {
-    local_queues[cluster_id] = &local_queue;
+    cluster_rings[cluster_id] = &local_rings;
     for (int i = 0; i < clusters; i++) {
       if (i != cluster_id) {
-        local_queues[i] = nullptr;
+        cluster_rings[i] = cluster.map_shared_rank(&local_rings, i);
       }
     }
   }
   cluster.sync();
 
-  uint32_t vertex;
+  uint32_t vertex = INVALID_VERTEX;
   while (true) {
     if (lane == 0) {
       // Try to pop from local queue
-      if (local_queue.empty()) {}
+      if (warp_ring.pop(vertex)) {
+        printf("Got from active hot ring\n");
+      } else if (false) {
+        // fetch from local queue
+      } else {
+        vertex = INVALID_VERTEX;
+      }
     }
 
-    if (vertex != UINT32_MAX) {
-      processVertex(vertex, graph, distances, local_queue, work_queue, cluster_id);
+    vertex = __shfl_sync(__activemask(), vertex, 0);
+    if (vertex != INVALID_VERTEX) {
+      processVertex(vertex, graph, distances, warp_ring, work_queue, cluster_id);
     } else {
       break;  // No more work in local queue
     }
