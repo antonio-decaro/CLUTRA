@@ -131,6 +131,21 @@ struct WorkQueueView {
     return cur_size;
   }
 
+  /**
+   * Lock-free approximate queue size used for steal candidate filtering.
+   * Exactness is not required: final stealing still happens through a locked
+   * pop operation.
+   */
+  __device__ __forceinline__ uint32_t sizeRelaxed() const {
+    cuda::atomic_ref<uint32_t, cuda::thread_scope_device> tail_ref(*tail);
+    cuda::atomic_ref<uint32_t, cuda::thread_scope_device> head_ref(*head);
+    const uint32_t tail_snapshot = tail_ref.load(cuda::memory_order_relaxed);
+    const uint32_t head_snapshot = head_ref.load(cuda::memory_order_relaxed);
+    return (tail_snapshot >= head_snapshot) ? (tail_snapshot - head_snapshot) : 0U;
+  }
+
+  __device__ __forceinline__ bool hasWorkRelaxed() const { return sizeRelaxed() > 0U; }
+
   __device__ __forceinline__ bool steal(T& out) { return false; }
 };
 

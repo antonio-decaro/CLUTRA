@@ -147,7 +147,8 @@ __device__ __forceinline__ void processTile(GraphDevT graph_dev,
     __syncthreads();
   }
 
-  for (int i = 0; i < warp_queue.size(); ++i) {
+  const int warp_queue_size = warp_queue.size();
+  for (int i = 0; i < warp_queue_size; ++i) {
     processVertexRange<Direction>(graph_dev, out_dev_frontier, functor, warp_queue.vertices[i], warp_queue.degrees[i],
                                   lane, ADVANCE_WARP_SIZE);
   }
@@ -281,7 +282,8 @@ tryGlobalClusterSteal(clutra::detail::utils::WorkQueueView<uint32_t, LockType>& 
             mapVictimExcludingSelf(nextStealRngState(lane_rng_state), my_cluster, num_clusters);
         bool candidate_available = false;
         if (lane_active) {
-          candidate_available = cluster_work_queues[proposed_victim].size() > 0U;
+          // Lock-free hint: avoid taking victim queue locks during broad probing.
+          candidate_available = cluster_work_queues[proposed_victim].hasWorkRelaxed();
         }
 
         const unsigned int candidate_mask = __ballot_sync(warp_mask, lane_active && candidate_available);
@@ -310,23 +312,23 @@ tryGlobalClusterSteal(clutra::detail::utils::WorkQueueView<uint32_t, LockType>& 
       }
 
       // Fallback to a full probe to preserve progress guarantees.
-      // if (!stole_any && lane == 0U) {
-      //   for (uint32_t i = 0; i < num_clusters - 1; ++i) {
-      //     const uint32_t victim = (start + i) % num_clusters;
-      //     if (victim == my_cluster) {
-      //       continue;
-      //     }
-      //     const int stolen = cluster_work_queues[victim].popChunkFromTail(local_cluster_queue.data, requested);
-      //     local_cluster_queue.setTail(stolen);
-      //     local_cluster_queue.setHead(0);
-      //
-      //     if (stolen > 0) {
-      //       stole_any = true;
-      //       next_cursor = (victim + 1U) % num_clusters;
-      //       break;
-      //     }
-      //   }
-      // }
+      if (!stole_any && lane == 0U) {
+        for (uint32_t i = 0; i < num_clusters - 1U; ++i) {
+          const uint32_t victim = (start + i) % num_clusters;
+          if (victim == my_cluster || !cluster_work_queues[victim].hasWorkRelaxed()) {
+            continue;
+          }
+          const int stolen = cluster_work_queues[victim].popChunkFromTail(local_cluster_queue.data, requested);
+          local_cluster_queue.setTail(stolen);
+          local_cluster_queue.setHead(0);
+
+          if (stolen > 0) {
+            stole_any = true;
+            next_cursor = (victim + 1U) % num_clusters;
+            break;
+          }
+        }
+      }
 
       if (!stole_any && lane == 0U) {
         next_cursor = (start + 1U) % num_clusters;
@@ -341,7 +343,6 @@ tryGlobalClusterSteal(clutra::detail::utils::WorkQueueView<uint32_t, LockType>& 
 
   cluster.sync();
   const bool has_new_work = ((*steal_state_ptr & STEAL_SUCCESS_MASK) != 0U);
-  // cluster.sync();
   return has_new_work;
 #else
   (void)local_cluster_queue;
@@ -445,7 +446,109 @@ __device__ uint32_t getAssignedEdge(uint32_t tile_gid, uint32_t tid) {
 }
 
 template <size_t BlockSize, graph::detail::DeviceGraphConcept GraphDevT, typename StealerDeviceT, typename LambdaT>
-__global__ void advanceKernel(GraphDevT graph_dev, size_t total_iters, StealerDeviceT stealer, LambdaT functor) {
+__device__ __forceinline__ void processEdgeTile(GraphDevT graph_dev,
+                                                uint32_t tile_gid,
+                                                clutra::detail::utils::SharedQueue<BlockSize>& cta_queue,
+                                                clutra::detail::utils::SharedQueue<ADVANCE_WARP_SIZE>& warp_queue,
+                                                StealerDeviceT stealer,
+                                                typename StealerDeviceT::template SharedState<BlockSize>& stealer_state,
+                                                LambdaT functor,
+                                                int tid,
+                                                int lane,
+                                                int block_dim) {
+  __syncthreads();
+  if (tid == 0) {
+    stealer.setReady(stealer_state, false);
+    cta_queue.init();
+  }
+  if (lane == 0) {
+    warp_queue.init();
+  }
+
+  __syncthreads();
+
+  const uint32_t edge_index = getAssignedEdge(tile_gid, tid);
+  if (edge_index < graph_dev.getEdgeCount()) {
+    const auto src = graph_dev.getSourceVertex(edge_index);
+    const auto dst = graph_dev.getDestinationVertex(edge_index);
+    const uint32_t total_degree = graph_dev.getDegree(src) + graph_dev.getDegree(dst);
+    const uint32_t cta_threshold = static_cast<uint32_t>(block_dim);
+    if (total_degree >= cta_threshold) {
+      cta_queue.push(edge_index, total_degree);
+    } else {
+      warp_queue.push(edge_index, total_degree);
+    }
+  }
+
+  __syncthreads();
+  if (tid == 0) {
+    stealer.setReady(stealer_state, true);
+  }
+
+  uint32_t edge = 0;
+  uint32_t degree = 0;
+  while (cta_queue.pop(edge, degree)) {
+    (void)degree;
+    if (static_cast<uint32_t>(tid) == (edge % static_cast<uint32_t>(block_dim))) {
+      const auto weight = graph_dev.getEdgeWeight(edge);
+      const auto src = graph_dev.getSourceVertex(edge);
+      const auto dst = graph_dev.getDestinationVertex(edge);
+      functor(src, dst, edge, weight);
+    }
+    __syncthreads();
+  }
+
+  const int warp_queue_size = warp_queue.size();
+  for (int i = 0; i < warp_queue_size; ++i) {
+    if (lane == (i & (ADVANCE_WARP_SIZE - 1))) {
+      const uint32_t warp_edge = warp_queue.vertices[i];
+      const auto weight = graph_dev.getEdgeWeight(warp_edge);
+      const auto src = graph_dev.getSourceVertex(warp_edge);
+      const auto dst = graph_dev.getDestinationVertex(warp_edge);
+      functor(src, dst, warp_edge, weight);
+    }
+  }
+}
+
+template <size_t BlockSize, graph::detail::DeviceGraphConcept GraphDevT, typename StealerDeviceT, typename LambdaT>
+__device__ __forceinline__ void
+runLocalEdgeStealLoop(GraphDevT graph_dev,
+                      StealerDeviceT stealer,
+                      typename StealerDeviceT::template SharedState<BlockSize>& stealer_state,
+                      LambdaT functor,
+                      int tid,
+                      int block_dim) {
+  while (true) {
+    const int steal_count =
+        stealer.template attemptStealing<BlockSize>(stealer_state, stealer.getLocalStealingChunkSize());
+    if (steal_count == 0) {
+      break;
+    }
+
+    for (int i = tid; i < steal_count; i += block_dim) {
+      uint32_t steal_edge = 0;
+      uint32_t steal_degree = 0;
+      stealer.template steal<BlockSize>(stealer_state, i, steal_edge, steal_degree);
+      (void)steal_degree;
+      const auto weight = graph_dev.getEdgeWeight(steal_edge);
+      const auto src = graph_dev.getSourceVertex(steal_edge);
+      const auto dst = graph_dev.getDestinationVertex(steal_edge);
+      functor(src, dst, steal_edge, weight);
+    }
+    __syncthreads();
+  }
+}
+
+template <size_t BlockSize,
+          graph::detail::DeviceGraphConcept GraphDevT,
+          typename LockType,
+          typename StealerDeviceT,
+          typename LambdaT>
+__global__ void advanceKernel(GraphDevT graph_dev,
+                              size_t work_tiles,
+                              clutra::detail::utils::WorkQueueView<uint32_t, LockType>* cluster_work_queues,
+                              StealerDeviceT stealer,
+                              LambdaT functor) {
 
   static_assert(BlockSize % ADVANCE_WARP_SIZE == 0, "BlockSize must be multiple of warp size");
 
@@ -458,82 +561,61 @@ __global__ void advanceKernel(GraphDevT graph_dev, size_t total_iters, StealerDe
   const int lane = tid & (ADVANCE_WARP_SIZE - 1);
   const int block_dim = blockDim.x;
   auto& warp_queue = warp_queues[warp_id];
+  auto& cluster_queue = clutra::detail::utils::getCurrentClusterQueueView(cluster_work_queues);
+  __shared__ uint32_t global_steal_state;
+
+  if (tid == 0) {
+    global_steal_state = 0;
+  }
+  __syncthreads();
 
   if (stealer.isIntraClusterStealingEnabled()) {
     stealer.template init<BlockSize>(&cta_queue, stealer_state);
   }
 
-  for (size_t iter = 0; iter < total_iters; ++iter) {  // TODO change with stealing with ptx
-    const uint32_t tile_gid = static_cast<uint32_t>(blockIdx.x + (iter * gridDim.x));
+  populateClusterQueue(cluster_queue, work_tiles);
 
-    __syncthreads();
-    if (tid == 0) {
-      stealer.setReady(stealer_state, false);
-      cta_queue.init();
-    }
-    if (lane == 0) {
-      warp_queue.init();
-    }
-
-    __syncthreads();
-
-    const uint32_t edge_index = getAssignedEdge(tile_gid, tid);
-    if (edge_index < graph_dev.getEdgeCount()) {
-      const auto src = graph_dev.getSourceVertex(edge_index);
-      const auto dst = graph_dev.getDestinationVertex(edge_index);
-      size_t tot_degree = graph_dev.getDegree(src) + graph_dev.getDegree(dst);
-      size_t cta_threshold = block_dim;
-      if (tot_degree >= cta_threshold) {
-        cta_queue.push(edge_index, tot_degree);
-      } else {
-        warp_queue.push(edge_index, tot_degree);
-      }
-    }
-
-    __syncthreads();
-
-    if (tid == 0) {
-      stealer.setReady(stealer_state, true);
-    }
-
-    uint32_t edge, degree;
-    while (cta_queue.pop(edge, degree)) {
-      const auto weight = graph_dev.getEdgeWeight(edge);
-      const auto src = graph_dev.getSourceVertex(edge);
-      const auto dst = graph_dev.getDestinationVertex(edge);
-      functor(src, dst, edge, weight);
-    }
-
-    for (int i = tid; i < warp_queue.size(); ++i) {
-      const uint32_t edge = warp_queue.vertices[i];
-      const auto weight = graph_dev.getEdgeWeight(edge);
-      const auto src = graph_dev.getSourceVertex(edge);
-      const auto dst = graph_dev.getDestinationVertex(edge);
-      functor(src, dst, edge, weight);
-    }
-  }
-
-  if (!stealer.isIntraClusterStealingEnabled()) {
-    return;
-  }
-
+  __shared__ uint32_t tile;
   while (true) {
-    const int steal_count =
-        stealer.template attemptStealing<BlockSize>(stealer_state, stealer.getLocalStealingChunkSize());
-    if (steal_count == 0) {
+    if (tid == 0 && !cluster_queue.pop(tile)) {
+      tile = UINT32_MAX;
+    }
+    __syncthreads();
+    if (tile == UINT32_MAX) {
       break;
     }
-    uint32_t steal_edge = 0;
-    uint32_t steal_degree = 0;
-    for (int i = 0; i < steal_count; ++i) {
-      stealer.template steal<BlockSize>(stealer_state, i, steal_edge, steal_degree);
-      const auto weight = graph_dev.getEdgeWeight(steal_edge);
-      const auto src = graph_dev.getSourceVertex(steal_edge);
-      const auto dst = graph_dev.getDestinationVertex(steal_edge);
-      functor(src, dst, steal_edge, weight);
-    }
-    __syncthreads();
+    processEdgeTile<BlockSize>(graph_dev, tile, cta_queue, warp_queue, stealer, stealer_state, functor, tid, lane,
+                               block_dim);
   }
+
+  if (stealer.isIntraClusterStealingEnabled()) {
+    runLocalEdgeStealLoop<BlockSize>(graph_dev, stealer, stealer_state, functor, tid, block_dim);
+  }
+
+  while (stealer.isInterClusterStealingEnabled()) {
+    const bool has_new_work = tryGlobalClusterSteal(cluster_queue, cluster_work_queues, stealer, global_steal_state);
+    if (!has_new_work) {
+      break;
+    }
+
+    while (true) {
+      if (tid == 0 && !cluster_queue.pop(tile)) {
+        tile = UINT32_MAX;
+      }
+      __syncthreads();
+      if (tile == UINT32_MAX) {
+        break;
+      }
+      processEdgeTile<BlockSize>(graph_dev, tile, cta_queue, warp_queue, stealer, stealer_state, functor, tid, lane,
+                                 block_dim);
+    }
+
+    if (stealer.isIntraClusterStealingEnabled()) {
+      runLocalEdgeStealLoop<BlockSize>(graph_dev, stealer, stealer_state, functor, tid, block_dim);
+    }
+  }
+
+  stealer.template finalize<BlockSize>();
 }
 
 }  // namespace clutra::operators::advance::detail

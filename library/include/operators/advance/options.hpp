@@ -5,8 +5,9 @@
 
 #pragma once
 
-namespace clutra::operators::advance::detail {
+namespace clutra::operators::advance {
 
+namespace detail {
 /**
  * @enum advance_direction
  * @brief Enumeration for advance operation direction.
@@ -16,6 +17,7 @@ enum class advance_direction {
   pull
 };
 
+
 /**
  * @enum view
  * @brief Enumeration for view types in advance operation.
@@ -23,6 +25,17 @@ enum class advance_direction {
 enum class view {
   frontier,
   graph,
+};
+
+}
+
+/**
+ * @enum advance_load_balance
+ * @brief Enumeration for advance load-balancing strategy.
+ */
+enum class load_balance {
+  bucketing,
+  block_mapped
 };
 
 }

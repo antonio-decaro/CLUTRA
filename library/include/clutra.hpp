@@ -14,7 +14,7 @@
 #include <graph/properties.hpp>
 
 // Operators
-#include <operators/advance/advance.cuh>
+#include <operators/advance.cuh>
 
 // IO includes
 #include <io/csr.hpp>

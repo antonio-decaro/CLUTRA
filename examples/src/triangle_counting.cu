@@ -12,6 +12,8 @@ struct MergePathsFunctor {
 
   template <typename U, typename V, typename E, typename W>
   __device__ bool operator()(U u, V v, E e, W w) const {
+    (void)e;
+    (void)w;
     if (!directed && u >= v) {
       return false;  // Process each edge only once
     }
@@ -19,10 +21,10 @@ struct MergePathsFunctor {
     auto src_end = graph_dev.end(u);
     auto dst_it = graph_dev.begin(v);
     auto dst_end = graph_dev.end(v);
+    int local_triangles = 0;
     while (src_it != src_end && dst_it != dst_end) {
       if (*src_it == *dst_it) {
-        // Found a common neighbor
-        atomicAdd(&edges[u], 1);
+        ++local_triangles;
         ++src_it;
         ++dst_it;
       } else if (*src_it < *dst_it) {
@@ -30,6 +32,9 @@ struct MergePathsFunctor {
       } else {
         ++dst_it;
       }
+    }
+    if (local_triangles > 0) {
+      atomicAdd(&edges[u], local_triangles);
     }
     return false;
   }
@@ -43,6 +48,11 @@ struct BinarySearchFunctor {
 
   template <typename U, typename V, typename E, typename W>
   __device__ bool operator()(U u, V v, E e, W w) const {
+    (void)e;
+    (void)w;
+    if (!directed && u >= v) {
+      return false;  // Process each edge only once
+    }
     auto src_start = graph_dev.getFirstNeighbor(u);
     auto dst_start = graph_dev.getFirstNeighbor(v);
     auto src_deg = graph_dev.getDegree(u);
@@ -61,6 +71,7 @@ struct BinarySearchFunctor {
     }
 
     auto col_indices = graph_dev.getColumnIndices();
+    int local_triangles = 0;
     for (int i = 0; i < a_deg; ++i) {
       auto x = col_indices[a_start + i];
       if (b_deg == 0) {
@@ -68,7 +79,7 @@ struct BinarySearchFunctor {
       }
       if (b_deg == 1) {
         if (x == col_indices[b_start]) {
-          atomicAdd(&edges[u], 1);
+          ++local_triangles;
         }
         continue;
       }
@@ -84,7 +95,7 @@ struct BinarySearchFunctor {
         } else if (x > y) {
           bottom = mid;
         } else {  // x == y
-          edges[threadIdx.x + (blockIdx.x * blockDim.x)] += 1;
+          ++local_triangles;
           found = true;
           break;
         }
@@ -92,9 +103,12 @@ struct BinarySearchFunctor {
 
       if (!found) {
         if (x == col_indices[b_start + bottom] || x == col_indices[b_start + top]) {
-          edges[threadIdx.x + (blockIdx.x * blockDim.x)] += 1;
+          ++local_triangles;
         }
       }
+    }
+    if (local_triangles > 0) {
+      atomicAdd(&edges[u], local_triangles);
     }
     return false;
   }
@@ -175,9 +189,11 @@ int main(int argc, char** argv) {
   bool directed = graph.getProperties().directed;
   std::cout << "[*] Running TC with method: " << tc_method << std::endl;
   if (tc_method == "binary") {
-    clutra::operators::advance::graph(graph, stealer, BinarySearchFunctor{graph_dev, directed, edges});
+    clutra::operators::advance::graph(graph, stealer, clutra::operators::advance::load_balance::block_mapped,
+                                      BinarySearchFunctor{graph_dev, directed, edges});
   } else {
-    clutra::operators::advance::graph(graph, stealer, MergePathsFunctor{graph_dev, directed, edges});
+    clutra::operators::advance::graph(graph, stealer, clutra::operators::advance::load_balance::block_mapped,
+                                      MergePathsFunctor{graph_dev, directed, edges});
   }
 
   clutra::profile::KernelProfiler profiler("reduce_triangles");
