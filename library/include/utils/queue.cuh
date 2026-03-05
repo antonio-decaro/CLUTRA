@@ -56,6 +56,50 @@ struct SharedQueue {
   __device__ int size() const { return tail; }
 };
 
+template <size_t Capacity>
+struct SharedQueueBlockMapped {
+  int tail;
+  int head;
+  uint32_t vertices[Capacity];
+  uint32_t begin_edges[Capacity];
+  uint32_t end_edges[Capacity];
+
+  __host__ static size_t getSizeInBytes() { return sizeof(SharedQueueBlockMapped<Capacity>); }
+
+  __device__ void init() {
+    tail = 0;
+    head = 0;
+  }
+
+  __forceinline__ __device__ int push(uint32_t vertex, uint32_t begin_edge, uint32_t end_edge) {
+    const int loc = atomicAdd(&tail, 1);
+    vertices[loc] = vertex;
+    begin_edges[loc] = begin_edge;
+    end_edges[loc] = end_edge;
+    return loc;
+  }
+
+  __forceinline__ __device__ bool pop(uint32_t& vertex, uint32_t& begin_edge, uint32_t& end_edge) {
+    cuda::atomic_ref<int, cuda::thread_scope_device> tail_ref(tail);
+    const int tail_snapshot = tail_ref.load(cuda::memory_order_relaxed);
+
+    if (head < 0 || head >= tail_snapshot) {
+      return false;  // empty
+    }
+
+    vertex = vertices[head];
+    begin_edge = begin_edges[head];
+    end_edge = end_edges[head];
+
+    if (threadIdx.x == 0) {
+      atomicAdd(&head, 1);
+    }
+    return true;
+  }
+
+  __device__ int size() const { return tail; }
+};
+
 template <typename T, typename LockType>
 struct WorkQueueView {
   T* data;

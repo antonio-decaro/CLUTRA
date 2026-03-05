@@ -66,6 +66,13 @@ struct StealerDevice {
 
   template <size_t BlockSize>
   /**
+   * @brief Initialize block-mapped queue mapping for local stealing.
+   */
+  __device__ void initBlockMapped(clutra::detail::utils::SharedQueueBlockMapped<BlockSize>*,
+                                  SharedState<BlockSize>&) const;
+
+  template <size_t BlockSize>
+  /**
    * @brief Attempt to steal a chunk from a victim block.
    * @param state Pointer to the stealer shared state.
    * @param chunk_size Requested number of items to steal (implementation may
@@ -75,6 +82,12 @@ struct StealerDevice {
    * atomics.
    */
   __device__ int attemptStealing(SharedState<BlockSize>&, int) const;
+
+  template <size_t BlockSize>
+  /**
+   * @brief Attempt to steal block-mapped chunks from a victim block.
+   */
+  __device__ int attemptStealingBlockMapped(SharedState<BlockSize>&, int) const;
 
   template <size_t BlockSize>
   /**
@@ -89,6 +102,12 @@ struct StealerDevice {
 
   template <size_t BlockSize>
   /**
+   * @brief Read the i-th stolen block-mapped chunk from the current victim.
+   */
+  __device__ void stealBlockMapped(SharedState<BlockSize>&, int, uint32_t&, uint32_t&, uint32_t&) const;
+
+  template <size_t BlockSize>
+  /**
    * @brief Finalize stealing for the block (e.g., cluster sync).
    */
   __device__ void finalize() const;
@@ -100,6 +119,12 @@ struct StealerDevice {
    * @param ready True when this block's queue is initialized and ready.
    */
   __device__ void setReady(SharedState<BlockSize>&, bool) const;
+
+  template <size_t BlockSize>
+  /**
+   * @brief Set local readiness for block-mapped local stealing.
+   */
+  __device__ void setReadyBlockMapped(SharedState<BlockSize>&, bool) const;
 };
 
 struct NullStealerDevice : StealerDevice {
@@ -119,6 +144,10 @@ struct NullStealerDevice : StealerDevice {
                        SharedState<BlockSize>& state) const {}
 
   template <size_t BlockSize>
+  __device__ void initBlockMapped(clutra::detail::utils::SharedQueueBlockMapped<BlockSize>* local_queue,
+                                  SharedState<BlockSize>& state) const {}
+
+  template <size_t BlockSize>
   /**
    * @brief No-op stealing attempt for NullStealerDevice.
    */
@@ -127,10 +156,19 @@ struct NullStealerDevice : StealerDevice {
   }
 
   template <size_t BlockSize>
+  __device__ int attemptStealingBlockMapped(SharedState<BlockSize>& state, int chunk_size) const {
+    return 0;
+  }
+
+  template <size_t BlockSize>
   /**
    * @brief No-op steal for NullStealerDevice.
    */
   __device__ void steal(SharedState<BlockSize>& state, int i, uint32_t&, uint32_t&) const {}
+
+  template <size_t BlockSize>
+  __device__ void
+  stealBlockMapped(SharedState<BlockSize>& state, int i, uint32_t&, uint32_t&, uint32_t&) const {}
 
   template <size_t BlockSize>
   /**
@@ -143,6 +181,9 @@ struct NullStealerDevice : StealerDevice {
    * @brief No-op ready setter for NullStealerDevice.
    */
   __device__ void setReady(SharedState<BlockSize>& state, bool ready) const {}
+
+  template <size_t BlockSize>
+  __device__ void setReadyBlockMapped(SharedState<BlockSize>& state, bool ready) const {}
 };
 
 struct BasicStealerDevice : StealerDevice {
@@ -161,6 +202,7 @@ struct BasicStealerDevice : StealerDevice {
     bool* is_finished_ptr[8];
     int* is_ready_ptr[8];
     clutra::detail::utils::SharedQueue<BlockSize>* cluster_queues[8];
+    clutra::detail::utils::SharedQueueBlockMapped<BlockSize>* cluster_block_mapped_queues[8];
   };
 
   template <size_t BlockSize>
@@ -170,10 +212,17 @@ struct BasicStealerDevice : StealerDevice {
   __device__ void init(clutra::detail::utils::SharedQueue<BlockSize>* local_queue, SharedState<BlockSize>& state) const;
 
   template <size_t BlockSize>
+  __device__ void initBlockMapped(clutra::detail::utils::SharedQueueBlockMapped<BlockSize>* local_queue,
+                                  SharedState<BlockSize>& state) const;
+
+  template <size_t BlockSize>
   /**
    * @brief Attempt to steal a chunk from another block.
    */
   __device__ int attemptStealing(SharedState<BlockSize>& state, int chunk_size) const;
+
+  template <size_t BlockSize>
+  __device__ int attemptStealingBlockMapped(SharedState<BlockSize>& state, int chunk_size) const;
 
   template <size_t BlockSize>
   /**
@@ -181,6 +230,9 @@ struct BasicStealerDevice : StealerDevice {
    * @note Calling this before a successful attemptStealing results in a no-op.
    */
   __device__ void steal(SharedState<BlockSize>& state, int i, uint32_t&, uint32_t&) const;
+
+  template <size_t BlockSize>
+  __device__ void stealBlockMapped(SharedState<BlockSize>& state, int i, uint32_t&, uint32_t&, uint32_t&) const;
 
   template <size_t BlockSize>
   /**
@@ -195,6 +247,9 @@ struct BasicStealerDevice : StealerDevice {
    * @param ready True when this block's queue is initialized and ready.
    */
   __device__ void setReady(SharedState<BlockSize>& state, bool ready) const;
+
+  template <size_t BlockSize>
+  __device__ void setReadyBlockMapped(SharedState<BlockSize>& state, bool ready) const;
 };
 
 }  // namespace clutra::stealer
