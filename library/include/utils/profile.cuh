@@ -4,13 +4,13 @@
  */
 
 #pragma once
-#include <cuda_runtime.h>
-#include <cstdlib>
 #include <cstdio>
-#include <iostream>
+#include <cstdlib>
+#include <cuda_runtime.h>
+#include <map>
 #include <mutex>
 #include <string>
-#include <map>
+#include <utils/misc.cuh>
 #include <vector>
 
 namespace clutra::profile {
@@ -52,20 +52,15 @@ public:
         const std::string& kernel = kernel_pair.first;
         const KernelStat& stat = kernel_pair.second;
         if (detail) {
-          std::printf("  %s -> runs: %llu, events: ",
-                      kernel.c_str(),
-                      static_cast<unsigned long long>(stat.count));
+          std::printf("  %s -> runs: %llu, events: ", kernel.c_str(), static_cast<unsigned long long>(stat.count));
           for (size_t i = 0; i < stat.events_ms.size(); ++i) {
             std::printf("%.3f ms%s", stat.events_ms[i], (i + 1 < stat.events_ms.size()) ? ", " : "");
           }
           std::printf("\n");
         } else {
           double avg = stat.count ? (stat.total_ms / static_cast<double>(stat.count)) : 0.0;
-          std::printf("  %s -> runs: %llu, total: %.3f ms, avg: %.3f ms\n",
-                      kernel.c_str(),
-                      static_cast<unsigned long long>(stat.count),
-                      stat.total_ms,
-                      avg);
+          std::printf("  %s -> runs: %llu, total: %.3f ms, avg: %.3f ms\n", kernel.c_str(),
+                      static_cast<unsigned long long>(stat.count), stat.total_ms, avg);
         }
       }
       grand_total += stage_stat.total_ms;
@@ -98,7 +93,9 @@ public:
   }
 
   void record(const char*, const char*, float) {}
+
   void reset() {}
+
   void printSummary(bool = false) const {}
 };
 #endif
@@ -106,8 +103,7 @@ public:
 class KernelProfiler {
 public:
 #ifdef ENABLE_PROFILING
-  KernelProfiler(const char* label, const char* stage = "default")
-      : _label(label), _stage(stage), _stopped(false) {
+  KernelProfiler(const char* label, const char* stage = "default") : _label(label), _stage(stage), _stopped(false) {
     CUDA_CHECK(cudaEventCreate(&_start));
     CUDA_CHECK(cudaEventCreate(&_stop));
     CUDA_CHECK(cudaEventRecord(_start));
@@ -120,19 +116,21 @@ public:
   }
 
   void stop() {
-    if (_stopped) { return; }
+    if (_stopped) {
+      return;
+    }
     CUDA_CHECK(cudaEventRecord(_stop));
     CUDA_CHECK(cudaEventSynchronize(_stop));
     float ms = 0.0f;
     CUDA_CHECK(cudaEventElapsedTime(&ms, _start, _stop));
-    KernelProfilerManager::instance().record(_label ? _label : "kernel",
-                                             _stage ? _stage : "default",
-                                             ms);
+    KernelProfilerManager::instance().record(_label ? _label : "kernel", _stage ? _stage : "default", ms);
     _stopped = true;
   }
 #else
   explicit KernelProfiler(const char*) {}
+
   ~KernelProfiler() = default;
+
   void stop() {}
 #endif
 
@@ -146,4 +144,4 @@ private:
 #endif
 };
 
-} // namespace clutra::profile
+}  // namespace clutra::profile
