@@ -13,21 +13,6 @@ else()
   add_library(clutra INTERFACE)
 endif()
 
-# Device-only CUDA sources that must be linked into final executables.
-file(GLOB_RECURSE CLUTRA_DEVICE_SOURCES
-  ${PROJECT_SOURCE_DIR}/library/device/*.cu
-)
-if(CLUTRA_DEVICE_SOURCES)
-  add_library(clutra_device_objs OBJECT ${CLUTRA_DEVICE_SOURCES})
-  set_target_properties(clutra_device_objs PROPERTIES
-    CUDA_STANDARD 20
-    CUDA_STANDARD_REQUIRED ON
-    CUDA_SEPARABLE_COMPILATION ON
-  )
-  target_include_directories(clutra_device_objs PRIVATE
-    ${PROJECT_SOURCE_DIR}/library/include
-  )
-endif()
 
 if (ENABLE_PROFILING)
   target_compile_definitions(clutra PUBLIC ENABLE_PROFILING)

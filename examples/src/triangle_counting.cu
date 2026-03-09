@@ -4,10 +4,18 @@
 #include <iostream>
 #include <thrust/device_vector.h>
 
+constexpr size_t MAX_THREADS = 1 << 20;
+
+struct ThreadWork {
+  size_t* work;
+  size_t* edge_count;
+};
+
 template <typename DeviceGraphT>
 struct MergePathsFunctor {
   DeviceGraphT graph_dev;
   bool directed;
+  ThreadWork thread_work;
   int* edges;
 
   template <typename U, typename V, typename E, typename W>
@@ -16,6 +24,10 @@ struct MergePathsFunctor {
     (void)w;
     if (!directed && u >= v) {
       return false;  // Process each edge only once
+    }
+    if (thread_work.work != nullptr && thread_work.edge_count != nullptr) {
+      thread_work.work[threadIdx.x + blockIdx.x * blockDim.x] += graph_dev.getDegree(u) + graph_dev.getDegree(v);
+      thread_work.edge_count[threadIdx.x + blockIdx.x * blockDim.x] += 1;
     }
     auto src_it = graph_dev.begin(u);
     auto src_end = graph_dev.end(u);
@@ -44,6 +56,7 @@ template <typename DeviceGraphT>
 struct BinarySearchFunctor {
   DeviceGraphT graph_dev;
   bool directed;
+  ThreadWork thread_work;
   int* edges;
 
   template <typename U, typename V, typename E, typename W>
@@ -157,8 +170,10 @@ int main(int argc, char** argv) {
   CLI::App app{"CLUTRA Triangle Counting (TC)"};
   auto cli_handles = configureBaseCLI(app, opts);
   std::string tc_method = "merge";
+  bool measure_work = false;
   app.add_option("--method", tc_method, "Triangle counting method: merge or binary (default: merge)")
       ->check(CLI::IsMember({"merge", "binary"}));
+  app.add_flag("--measure-work", measure_work, "Measure work distribution across threads");
   CLI11_PARSE(app, argc, argv);
   finalizeGraphOptions(opts, cli_handles);
 
@@ -183,17 +198,26 @@ int main(int argc, char** argv) {
   auto graph_dev = graph.getDeviceGraph();
 
   int* edges;
-  cudaMalloc(&edges, sizeof(int) * graph.getVertexCount());
-  cudaMemset(edges, 0, sizeof(int) * graph.getVertexCount());
+  CUDA_CHECK(cudaMalloc(&edges, sizeof(int) * graph.getVertexCount()));
+  CUDA_CHECK(cudaMemset(edges, 0, sizeof(int) * graph.getVertexCount()));
 
-  bool directed = graph.getProperties().directed;
+  ThreadWork thread_work{nullptr, nullptr};
+  if (measure_work) {
+    std::cout << "[*] Measuring work distribution across threads" << std::endl;
+    CUDA_CHECK(cudaMalloc(&thread_work.work, sizeof(size_t) * MAX_THREADS));
+    CUDA_CHECK(cudaMalloc(&thread_work.edge_count, sizeof(size_t) * MAX_THREADS));
+    CUDA_CHECK(cudaMemset(thread_work.work, 0, sizeof(size_t) * MAX_THREADS));
+    CUDA_CHECK(cudaMemset(thread_work.edge_count, 0, sizeof(size_t) * MAX_THREADS));
+  }
+
+  const bool directed = graph.getProperties().directed;
   std::cout << "[*] Running TC with method: " << tc_method << std::endl;
   if (tc_method == "binary") {
     clutra::operators::advance::graph(graph, stealer, clutra::operators::advance::load_balance::block_mapped,
-                                      BinarySearchFunctor{graph_dev, directed, edges});
+                                      BinarySearchFunctor{graph_dev, directed, thread_work, edges});
   } else {
     clutra::operators::advance::graph(graph, stealer, clutra::operators::advance::load_balance::block_mapped,
-                                      MergePathsFunctor{graph_dev, directed, edges});
+                                      MergePathsFunctor{graph_dev, directed, thread_work, edges});
   }
 
   clutra::profile::KernelProfiler profiler("reduce_triangles");
@@ -222,6 +246,17 @@ int main(int argc, char** argv) {
   }
 
   cudaFree(edges);
+
+  if (measure_work) {
+    std::vector<size_t> h_work_per_thread(MAX_THREADS);
+    std::vector<size_t> h_edges_per_thread(MAX_THREADS);
+    cudaMemcpy(h_work_per_thread.data(), thread_work.work, sizeof(size_t) * MAX_THREADS, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_edges_per_thread.data(), thread_work.edge_count, sizeof(size_t) * MAX_THREADS, cudaMemcpyDeviceToHost);
+    cudaFree(thread_work.work);
+    cudaFree(thread_work.edge_count);
+    printArray(h_work_per_thread, "Work per thread: ");
+    printArray(h_edges_per_thread, "Edges per thread: ");
+  }
 
   clutra::profile::KernelProfilerManager::instance().printSummary(opts.profiling_detail);
 }

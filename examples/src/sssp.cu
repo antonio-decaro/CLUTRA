@@ -84,7 +84,8 @@ int main(int argc, char** argv) {
   std::cerr << "[*] CSR Building Graph" << std::endl;
   auto graph = clutra::graph::createGraph(csr, properties);
   printGraphInfo(graph);
-  printStealingOptions(opts, false);
+  auto stealer_config = getStealingConfig(opts);
+  printStealingOptions(stealer_config, false);
 
   clutra::frontier::FrontierMLB<uint32_t> in_frontier(graph.getVertexCount());
   clutra::frontier::FrontierMLB<uint32_t> out_frontier(graph.getVertexCount());
@@ -102,7 +103,6 @@ int main(int argc, char** argv) {
 
   int iter = 0;
 
-  auto stealer_config = getStealingConfig(opts);
   clutra::stealer::BasicStealer stealer(stealer_config);
 
   std::cout << "[*] Running SSSP from source vertex " << opts.source << std::endl;
@@ -110,6 +110,7 @@ int main(int argc, char** argv) {
     // std::cout << "[*] SSSP Iteration " << iter << ", Frontier Size: " << in_frontier.getOutDegree(graph) <<
     // std::endl;
     clutra::operators::advance::push(graph, in_frontier, out_frontier, stealer,
+                                     clutra::operators::advance::load_balance::block_mapped,
                                      [iter, distances] __device__(auto u, auto v, auto e, auto w) {
                                        float source_distance = distances[u];
                                        float distance_to_neighbor = source_distance + static_cast<float>(w);

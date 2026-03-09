@@ -16,13 +16,15 @@ SCRIPT_DIR=/home/dcrntn002/CLUTRA
 # SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 dataset_folder="/home/dcrntn002/datasets"
+repetitions=5
 
-while getopts :hsf: flag
+while getopts :hsn:f: flag
 do
   case "${flag}" in
-    f) dataset_folder=${OPTARG}; shift; shift;;
+    f) dataset_folder=${OPTARG};;
     h) print_usage
        exit 0;;
+    n) repetitions=${OPTARG};;
     \?) echo "Invalid option: -${OPTARG}" >&2
         print_usage
         exit 1;;
@@ -42,8 +44,9 @@ indochina-2004:56926,86450,148030,154316,155498,176597,182178,291167,328383,3596
 soc-LiveJournal1:47,171,321,507,732,1001,1305,1612,1943,2263,2583,2912,3243,3571,3899,4227,4556,4885,5214,5543;\
 soc-twitter-2010:1138,1535,2316,4326,6573,10395,13713,17612,20125,23378,26350,29761,32912,36645,39827,42813,46226,49187,52310,56726;\
 "
-DATASET="hollywood-2009;soc-orkut;indochina-2004;soc-LiveJournal1;roadNet-CA;road_usa;soc-orkut;kron_g500-logn21;com-Friendster;uk-2002;uk-2005;europe_osm;it-2004;webbase-2001;sk-2005"
-# DATASET="roadNet-CA"
+DATASET="hollywood-2009;soc-orkut;indochina-2004;soc-LiveJournal1;roadNet-CA;road_usa;soc-orkut;kron_g500-logn21;com-Friendster;uk-2002;webbase-2001"
+# DATASET="uk-2002;uk-2005;it-2004;webbase-2001;sk-2005"
+# DATASET="indochina-2004"
 
 function print_usage {
   echo "Usage: $0 <benchmark> [args...]"
@@ -56,42 +59,66 @@ if [ $# -lt 1 ]; then
   exit 1
 fi
 
-benchmark="$1"
+benchmark=${@: -1} 
 shift
 
 case "$benchmark" in
   *tc)
     target_script="$SCRIPT_DIR/scripts/run_benchmark.sh"
     echo "[*]Running Baseline"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/1c -f $dataset_folder -n 5 -c 1 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/1c -f $dataset_folder -n $repetitions -c 1 -d $DATASET -b triangle_counting "$@"
     echo "[*]Running cluster-size=2 | local stealing"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/2cl -f $dataset_folder -n 5 -l -c 2 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/2cl -f $dataset_folder -n $repetitions -l -c 2 -d $DATASET -b triangle_counting "$@"
     echo "[*]Running cluster-size=4 | local stealing"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/4cl -f $dataset_folder -n 5 -l -c 4 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/4cl -f $dataset_folder -n $repetitions -l -c 4 -d $DATASET -b triangle_counting "$@"
     echo "[*]Running cluster-size=8 | local stealing"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/8cl -f $dataset_folder -n 5 -l -c 8 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/8cl -f $dataset_folder -n $repetitions -l -c 8 -d $DATASET -b triangle_counting "$@"
     echo "[*]Running cluster-size=1 | global stealing"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/1cg -f $dataset_folder -n 5 -g -c 1 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/1cg -f $dataset_folder -n $repetitions -g -c 1 -d $DATASET -b triangle_counting "$@"
     echo "[*]Running cluster-size=2 | global stealing"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/2cg -f $dataset_folder -n 5 -g -c 2 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/2cg -f $dataset_folder -n $repetitions -g -c 2 -d $DATASET -b triangle_counting "$@"
     echo "[*]Running cluster-size=4 | global stealing"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/4cg -f $dataset_folder -n 5 -g -c 4 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/4cg -f $dataset_folder -n $repetitions -g -c 4 -d $DATASET -b triangle_counting "$@"
     echo "[*]Running cluster-size=8 | global stealing"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/8cg -f $dataset_folder -n 5 -g -c 8 -d $DATASET -b triangle_counting "$@"
-    echo "[*]Running cluster-size=1 | local + global stealing"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/1clg -f $dataset_folder -n 5 -s -c 1 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/8cg -f $dataset_folder -n $repetitions -g -c 8 -d $DATASET -b triangle_counting "$@"
     echo "[*]Running cluster-size=2 | local + global stealing"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/2clg -f $dataset_folder -n 5 -s -c 2 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/2clg -f $dataset_folder -n $repetitions -s -c 2 -d $DATASET -b triangle_counting "$@"
     echo "[*]Running cluster-size=4 | local + global stealing"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/4clg -f $dataset_folder -n 5 -s -c 4 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/4clg -f $dataset_folder -n $repetitions -s -c 4 -d $DATASET -b triangle_counting "$@"
     echo "[*]Running cluster-size=8 | local + global stealing"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/8clg -f $dataset_folder -n 5 -s -c 8 -d $DATASET -b triangle_counting "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/tc/8clg -f $dataset_folder -n $repetitions -s -c 8 -d $DATASET -b triangle_counting "$@"
     exit $?
+    ;;
+  *bfs)
+    target_script="$SCRIPT_DIR/scripts/run_benchmark.sh"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/bfs/1c $MEASURE_IMBALANCE_ARGS -b bfs "$@"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/bfs/2cl $MEASURE_IMBALANCE_ARGS -s -b bfs "$@"
     ;;
   *imbalance)
     target_script="$SCRIPT_DIR/scripts/run_benchmark.sh"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/imbalance/no-stealing/ $MEASURE_IMBALANCE_ARGS "$@"
-    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/imbalance/stealing/ $MEASURE_IMBALANCE_ARGS -s "$@"
+    echo "[*]Running Baseline"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/imbalance/1c -f $dataset_folder -n 1 -c 1 -w -d $DATASET -b triangle_counting "$@"
+    echo "[*]Running cluster-size=2 | local stealing"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/imbalance/2cl -f $dataset_folder -n 1 -l -c 2 -w -d $DATASET -b triangle_counting "$@"
+    echo "[*]Running cluster-size=4 | local stealing"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/imbalance/4cl -f $dataset_folder -n 1 -l -c 4 -w -d $DATASET -b triangle_counting "$@"
+    echo "[*]Running cluster-size=8 | local stealing"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/imbalance/8cl -f $dataset_folder -n 1 -l -c 8 -w -d $DATASET -b triangle_counting "$@"
+    echo "[*]Running cluster-size=1 | global stealing"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/imbalance/1cg -f $dataset_folder -n 1 -g -c 1 -w -d $DATASET -b triangle_counting "$@"
+    echo "[*]Running cluster-size=2 | global stealing"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/imbalance/2cg -f $dataset_folder -n 1 -g -c 2 -w -d $DATASET -b triangle_counting "$@"
+    echo "[*]Running cluster-size=4 | global stealing"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/imbalance/4cg -f $dataset_folder -n 1 -g -c 4 -w -d $DATASET -b triangle_counting "$@"
+    echo "[*]Running cluster-size=8 | global stealing"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/imbalance/8cg -f $dataset_folder -n 1 -g -c 8 -w -d $DATASET -b triangle_counting "$@"
+    echo "[*]Running cluster-size=2 | local + global stealing"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/imbalance/2clg -f $dataset_folder -n 1 -s -c 2 -w -d $DATASET -b triangle_counting "$@"
+    echo "[*]Running cluster-size=4 | local + global stealing"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/imbalance/4clg -f $dataset_folder -n 1 -s -c 4 -w -d $DATASET -b triangle_counting "$@"
+    echo "[*]Running cluster-size=8 | local + global stealing"
+    bash "$target_script" $SCRIPT_DIR -o $SCRIPT_DIR/out/imbalance/8clg -f $dataset_folder -n 1 -s -c 8 -w -d $DATASET -b triangle_counting "$@"
+    exit $?
     ;;
   *benchmark)
     target_script="$SCRIPT_DIR/scripts/run_benchmark.sh"

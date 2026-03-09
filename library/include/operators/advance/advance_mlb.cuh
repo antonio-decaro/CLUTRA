@@ -6,13 +6,11 @@
 #pragma once
 
 #include "utils/atomic.cuh"
-#include <concepts>
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <frontier/frontier.cuh>
 #include <graph/concept.hpp>
 #include <graph/graph.cuh>
-#include <memory>
 #include <operators/advance/kernel_block_mapped.cuh>
 #include <operators/advance/kernel_bucketing.cuh>
 #include <operators/advance/options.hpp>
@@ -423,59 +421,6 @@ void launchKernel(const GraphT& graph,
                   const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer,
                   LambdaT&& functor) {
   launchKernel<Direction>(graph, output_frontier, stealer, load_balance::bucketing, std::forward<LambdaT>(functor));
-}
-
-/**
- * Launch edge-based advance kernel (i.e., all edges are processed).
- */
-template <clutra::graph::detail::GraphConcept GraphT,
-          typename DerivedStealerT,
-          typename DeviceStealerT,
-          typename LambdaT>
-void launchEdgeKernel(const GraphT& graph,
-                      const clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer,
-                      LambdaT&& functor) {
-  constexpr size_t CU_SIZE = 512;
-  using LockType = clutra::detail::atomic::TicketLock;
-  auto graph_dev = graph.getDeviceGraph();
-
-  const size_t edge_count = graph.getEdgeCount();
-
-  const size_t block_size = CU_SIZE;
-  const size_t work_tiles = (edge_count + block_size - 1) / block_size;
-  int device_id = 0;
-  CUDA_CHECK(cudaGetDevice(&device_id));
-
-  const size_t smem = getAdvanceSharedMemorySize<CU_SIZE>(stealer.template getSharedStateSizeInBytes<CU_SIZE>());
-  const size_t grid_size = clutra::detail::device::getMaxOccupancyGridSize(
-      device_id, block_size, smem,
-      advanceKernel<CU_SIZE, decltype(graph_dev), LockType, decltype(stealer.getDeviceStealer()), LambdaT>);
-  const size_t cluster_size = stealer.getPreferredClusterSize();
-  auto launch_config = clutra::detail::kernels::adjustLaunchConfig(grid_size, block_size, cluster_size, work_tiles);
-
-  const uint32_t num_clusters = static_cast<uint32_t>(launch_config.grid_size / launch_config.cluster_size);
-  const uint32_t tiles_per_cluster =
-      static_cast<uint32_t>(work_tiles == 0 ? 1 : (work_tiles + num_clusters - 1) / num_clusters);
-  clutra::detail::utils::ClusterWorkQueues<uint32_t, LockType> work_queues(num_clusters, tiles_per_cluster);
-
-  clutra::detail::log("Advance Edge Operator Launch - LB: bucketing, Edge Count: {}, Grid Size: {} (was {}), Block "
-                      "Size: {}, Cluster Size: {}, SMEM: {}, Local Stealing: {}, Global Stealing: {}, Local Chunk: "
-                      "{}, Global Chunk: {}",
-                      edge_count, launch_config.grid_size, grid_size, launch_config.block_size,
-                      launch_config.cluster_size, smem, stealer.isIntraClusterStealingEnabled() ? "Yes" : "No",
-                      stealer.isInterClusterStealingEnabled() ? "Yes" : "No", stealer.getLocalStealingChunkSize(),
-                      stealer.getGlobalStealingChunkSize());
-
-  clutra::profile::KernelProfiler profiler("advanceKernelEdge", "core");
-
-  auto stealer_dev = stealer.getDeviceStealer();
-  auto& kernel_launch_function =
-      detail::advanceKernel<CU_SIZE, decltype(graph_dev), LockType, decltype(stealer_dev), LambdaT>;
-  clutra::detail::kernels::launchClusterKernel(launch_config, kernel_launch_function, graph_dev, work_tiles,
-                                               work_queues.deviceViews(), stealer_dev, std::forward<LambdaT>(functor));
-
-  CUDA_CHECK(cudaDeviceSynchronize());
-  profiler.stop();
 }
 
 }  // namespace clutra::operators::advance::detail

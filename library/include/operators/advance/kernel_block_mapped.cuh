@@ -7,9 +7,17 @@
 
 #include <cub/block/block_scan.cuh>
 
+#include <operators/advance/global_stealing.cuh>
 #include <operators/advance/kernel_bucketing.cuh>
 
 namespace clutra::operators::advance::detail {
+
+struct BlockMappedStealTask {
+  uint32_t vertex;
+  uint32_t edge_begin;
+  uint32_t edge_end;
+  uint32_t next_edge;
+};
 
 template <typename T>
 __device__ __forceinline__ uint32_t blockMappedUpperBound(const T* values, uint32_t n, T value) {
@@ -50,6 +58,61 @@ __device__ __forceinline__ void processBlockMappedEdgeRange(GraphDevT graph_dev,
     if (functor(source, neighbor, edge, weight)) {
       out_dev_frontier.insert(neighbor);
     }
+  }
+}
+
+__device__ __forceinline__ uint32_t getBlockMappedStealEdgeChunk(int block_dim) {
+  constexpr uint32_t BASE_MULTIPLIER = 8U;
+  constexpr uint32_t MIN_MULTIPLIER = 2U;
+  constexpr uint32_t MAX_MULTIPLIER = 32U;
+
+  const uint32_t base = static_cast<uint32_t>(block_dim);
+  const uint32_t target = base * BASE_MULTIPLIER;
+  const uint32_t min_chunk = base * MIN_MULTIPLIER;
+  const uint32_t max_chunk = base * MAX_MULTIPLIER;
+  const uint32_t chunk = target < min_chunk ? min_chunk : target;
+  return chunk > max_chunk ? max_chunk : chunk;
+}
+
+template <advance_direction Direction,
+          size_t BlockSize,
+          graph::detail::DeviceGraphConcept GraphDevT,
+          typename OutFrontierDevT,
+          typename LambdaT>
+__device__ __forceinline__ void processBlockMappedTaskTicket(GraphDevT graph_dev,
+                                                             OutFrontierDevT out_dev_frontier,
+                                                             LambdaT functor,
+                                                             BlockMappedStealTask* tasks,
+                                                             uint32_t task_index,
+                                                             uint32_t edge_chunk,
+                                                             uint32_t* lease_scratch,
+                                                             int tid,
+                                                             int block_dim) {
+  uint32_t& lease_source = lease_scratch[0];
+  uint32_t& lease_begin = lease_scratch[1];
+  uint32_t& lease_end = lease_scratch[2];
+
+  while (true) {
+    if (tid == 0) {
+      auto& task = tasks[task_index % static_cast<uint32_t>(BlockSize)];
+      const uint32_t lease_start = atomicAdd(reinterpret_cast<unsigned int*>(&task.next_edge), edge_chunk);
+      lease_source = task.vertex;
+      lease_begin = lease_start < task.edge_end ? lease_start : task.edge_end;
+      uint32_t lease_stop = lease_start + edge_chunk;
+      if (lease_stop > task.edge_end) {
+        lease_stop = task.edge_end;
+      }
+      lease_end = lease_stop;
+    }
+    __syncthreads();
+
+    if (lease_begin >= lease_end) {
+      break;
+    }
+
+    processBlockMappedEdgeRange<Direction>(graph_dev, out_dev_frontier, functor, lease_source, lease_begin, lease_end,
+                                           tid, block_dim);
+    __syncthreads();
   }
 }
 
@@ -139,6 +202,7 @@ processBlockMappedTileWithLocalStealing(GraphDevT graph_dev,
                                         int coarsening_factor,
                                         uint32_t tile_gid,
                                         clutra::detail::utils::SharedQueueBlockMapped<BlockSize>& cta_queue,
+                                        BlockMappedStealTask* steal_tasks,
                                         StealerDeviceT stealer,
                                         typename StealerDeviceT::template SharedState<BlockSize>& stealer_state,
                                         LambdaT functor,
@@ -147,6 +211,7 @@ processBlockMappedTileWithLocalStealing(GraphDevT graph_dev,
                                         uint32_t* scan_begins,
                                         uint32_t* scan_ends,
                                         uint32_t* total_edges,
+                                        uint32_t* lease_scratch,
                                         typename cub::BlockScan<uint32_t, BlockSize>::TempStorage& scan_storage,
                                         int tid,
                                         int block_dim) {
@@ -155,7 +220,7 @@ processBlockMappedTileWithLocalStealing(GraphDevT graph_dev,
 
   __syncthreads();
   if (tid == 0) {
-    stealer.setReadyBlockMapped(stealer_state, false);
+    stealer.setReady(stealer_state, false);
     cta_queue.init();
   }
   __syncthreads();
@@ -171,7 +236,8 @@ processBlockMappedTileWithLocalStealing(GraphDevT graph_dev,
   start_edges[tid] = begin_edge;
 
   if (queue_candidate && degree > 0U) {
-    cta_queue.push(assigned_vertex, begin_edge, begin_edge + degree);
+    steal_tasks[tid] = BlockMappedStealTask{assigned_vertex, begin_edge, begin_edge + degree, begin_edge};
+    cta_queue.push(static_cast<uint32_t>(tid));
   }
 
   const uint32_t scan_degree = queue_candidate ? 0U : degree;
@@ -213,15 +279,14 @@ processBlockMappedTileWithLocalStealing(GraphDevT graph_dev,
 
   __syncthreads();
   if (tid == 0) {
-    stealer.setReadyBlockMapped(stealer_state, true);
+    stealer.setReady(stealer_state, true);
   }
 
-  uint32_t source = 0;
-  uint32_t steal_begin_edge = 0;
-  uint32_t steal_end_edge = 0;
-  while (cta_queue.pop(source, steal_begin_edge, steal_end_edge)) {
-    processBlockMappedEdgeRange<Direction>(graph_dev, out_dev_frontier, functor, source, steal_begin_edge,
-                                           steal_end_edge, tid, block_dim);
+  const uint32_t edge_chunk = getBlockMappedStealEdgeChunk(block_dim);
+  uint32_t task_index = 0;
+  while (cta_queue.pop(task_index)) {
+    processBlockMappedTaskTicket<Direction, BlockSize>(graph_dev, out_dev_frontier, functor, steal_tasks, task_index,
+                                                       edge_chunk, lease_scratch, tid, block_dim);
     __syncthreads();
   }
 }
@@ -237,26 +302,23 @@ runLocalBlockMappedStealLoop(GraphDevT graph_dev,
                              OutFrontierDevT out_dev_frontier,
                              StealerDeviceT stealer,
                              typename StealerDeviceT::template SharedState<BlockSize>& stealer_state,
+                             uint32_t* lease_scratch,
                              LambdaT functor,
                              int tid,
                              int block_dim) {
-  while (true) {
-    const int steal_count =
-        stealer.template attemptStealingBlockMapped<BlockSize>(stealer_state, stealer.getLocalStealingChunkSize());
-    if (steal_count == 0) {
-      break;
-    }
-
-    for (int i = 0; i < steal_count; ++i) {
-      uint32_t source = 0;
-      uint32_t begin_edge = 0;
-      uint32_t end_edge = 0;
-      stealer.template stealBlockMapped<BlockSize>(stealer_state, i, source, begin_edge, end_edge);
-      processBlockMappedEdgeRange<Direction>(graph_dev, out_dev_frontier, functor, source, begin_edge, end_edge, tid,
-                                             block_dim);
-    }
-    __syncthreads();
-  }
+  const uint32_t edge_chunk = getBlockMappedStealEdgeChunk(block_dim);
+  stealer.template runLocalStealLoop<BlockSize>(
+      stealer_state, stealer.getLocalStealingChunkSize(),
+      [&](const clutra::stealer::StealQueueDescriptor& desc, int queue_index, int steal_index, int steal_count) {
+        (void)steal_index;
+        (void)steal_count;
+        auto* task_ids = reinterpret_cast<uint32_t*>(desc.payload0);
+        auto* tasks = reinterpret_cast<BlockMappedStealTask*>(desc.payload1);
+        const uint32_t task_index = task_ids[queue_index % static_cast<int>(BlockSize)];
+        processBlockMappedTaskTicket<Direction, BlockSize>(graph_dev, out_dev_frontier, functor, tasks, task_index,
+                                                           edge_chunk, lease_scratch, tid, block_dim);
+        __syncthreads();
+      });
 }
 
 template <view View,
@@ -287,6 +349,8 @@ __global__ void advanceKernelBlockMapped(GraphDevT graph_dev,
   __shared__ typename cub::BlockScan<uint32_t, BlockSize>::TempStorage scan_storage;
 
   __shared__ clutra::detail::utils::SharedQueueBlockMapped<BlockSize> cta_queue;
+  __shared__ BlockMappedStealTask steal_tasks[BlockSize];
+  __shared__ uint32_t lease_scratch[3];
   __shared__ typename StealerDeviceT::template SharedState<BlockSize> stealer_state;
 
   const int tid = threadIdx.x;
@@ -300,7 +364,12 @@ __global__ void advanceKernelBlockMapped(GraphDevT graph_dev,
   __syncthreads();
 
   if (stealer.isIntraClusterStealingEnabled()) {
-    stealer.template initBlockMapped<BlockSize>(&cta_queue, stealer_state);
+    stealer.template init<BlockSize>(stealer_state, [&](auto& cluster, int rank) {
+      auto* q = cluster.map_shared_rank(&cta_queue, rank);
+      auto* tasks = cluster.map_shared_rank(steal_tasks, rank);
+      return clutra::stealer::StealQueueDescriptor{&q->head, &q->tail, reinterpret_cast<uintptr_t>(q->task_ids),
+                                                   reinterpret_cast<uintptr_t>(tasks), 0U};
+    });
   }
 
   populateClusterQueue(cluster_queue, work_tiles);
@@ -317,8 +386,9 @@ __global__ void advanceKernelBlockMapped(GraphDevT graph_dev,
 
     if (stealer.isIntraClusterStealingEnabled()) {
       processBlockMappedTileWithLocalStealing<View, Direction, BlockSize>(
-          graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, tile, cta_queue, stealer, stealer_state,
-          functor, vertices, start_edges, scan_begins, scan_ends, total_edges, scan_storage, tid, block_dim);
+          graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, tile, cta_queue, steal_tasks, stealer,
+          stealer_state, functor, vertices, start_edges, scan_begins, scan_ends, total_edges, lease_scratch,
+          scan_storage, tid, block_dim);
     } else {
       processBlockMappedTile<View, Direction, BlockSize>(
           graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, tile, functor, vertices, start_edges,
@@ -327,8 +397,8 @@ __global__ void advanceKernelBlockMapped(GraphDevT graph_dev,
   }
 
   if (stealer.isIntraClusterStealingEnabled()) {
-    runLocalBlockMappedStealLoop<Direction, BlockSize>(graph_dev, out_dev_frontier, stealer, stealer_state, functor,
-                                                       tid, block_dim);
+    runLocalBlockMappedStealLoop<Direction, BlockSize>(graph_dev, out_dev_frontier, stealer, stealer_state,
+                                                       lease_scratch, functor, tid, block_dim);
   }
 
   while (stealer.isInterClusterStealingEnabled()) {
@@ -348,8 +418,9 @@ __global__ void advanceKernelBlockMapped(GraphDevT graph_dev,
 
       if (stealer.isIntraClusterStealingEnabled()) {
         processBlockMappedTileWithLocalStealing<View, Direction, BlockSize>(
-            graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, tile, cta_queue, stealer, stealer_state,
-            functor, vertices, start_edges, scan_begins, scan_ends, total_edges, scan_storage, tid, block_dim);
+            graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, tile, cta_queue, steal_tasks, stealer,
+            stealer_state, functor, vertices, start_edges, scan_begins, scan_ends, total_edges, lease_scratch,
+            scan_storage, tid, block_dim);
       } else {
         processBlockMappedTile<View, Direction, BlockSize>(
             graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, tile, functor, vertices, start_edges,
@@ -358,8 +429,8 @@ __global__ void advanceKernelBlockMapped(GraphDevT graph_dev,
     }
 
     if (stealer.isIntraClusterStealingEnabled()) {
-      runLocalBlockMappedStealLoop<Direction, BlockSize>(graph_dev, out_dev_frontier, stealer, stealer_state, functor,
-                                                         tid, block_dim);
+      runLocalBlockMappedStealLoop<Direction, BlockSize>(graph_dev, out_dev_frontier, stealer, stealer_state,
+                                                         lease_scratch, functor, tid, block_dim);
     }
   }
 

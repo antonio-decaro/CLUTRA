@@ -196,6 +196,17 @@ inline void printStealingOptions(const clutra::stealer::StealerConfig& config, b
   }
 }
 
+template<typename T>
+void printArray(const std::vector<T>& arr, std::string prefix = "") {
+  std::cout << prefix;
+  for (int i = 0; i < arr.size(); i++) {
+    if (arr[i] > static_cast<T>(0)) {
+      std::cout << arr[i] << " ";
+    }
+  } 
+  std::cout << std::endl;
+}
+
 inline void printDeviceInfo(std::string prefix = "") {
   int device_id;
   cudaGetDevice(&device_id);

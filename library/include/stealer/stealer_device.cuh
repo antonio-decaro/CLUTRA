@@ -8,191 +8,90 @@
 #include <cooperative_groups.h>
 #include <cstddef>
 #include <cstdint>
+#include <cuda/atomic>
+#include <cuda_runtime.h>
 #include <stealer/stealer_config.cuh>
-#include <utils/queue.cuh>
 
 namespace clutra::stealer {
+
+struct StealQueueDescriptor {
+  int* head;
+  int* tail;
+  uintptr_t payload0;
+  uintptr_t payload1;
+  uintptr_t payload2;
+};
 
 struct StealerDevice {
   StealerConfig config{};
 
   StealerDevice() = default;
 
-  StealerDevice(const StealerConfig& cfg) : config(cfg) {}
+  explicit StealerDevice(const StealerConfig& cfg) : config(cfg) {}
 
-  /**
-   * @brief Returns true if intra-cluster stealing is enabled and available.
-   */
   __forceinline__ __device__ bool isIntraClusterStealingEnabled() const {
     return config.intra_cluster_stealing_enabled;
   }
 
-  /**
-   * @brief Returns the preferred cluster size for stealing.
-   */
   __forceinline__ __device__ int getPreferredClusterSize() const { return config.preferred_cluster_size; }
 
-  /**
-   * @brief Returns the stealing chunk size.
-   */
   __forceinline__ __device__ int getLocalStealingChunkSize() const { return config.local_stealing_chunk_size; }
 
-  /**
-   * @brief Returns true if inter-cluster stealing is enabled.
-   */
   __forceinline__ __device__ bool isInterClusterStealingEnabled() const {
     return config.inter_cluster_stealing_enabled;
   }
 
-  /**
-   * @brief Returns the global stealing chunk size.
-   */
   __forceinline__ __device__ int getGlobalStealingChunkSize() const { return config.global_stealing_chunk_size; }
 
   template <size_t BlockSize>
-  /**
-   * @brief Per-block shared state for the stealer implementation.
-   */
   struct SharedState {};
 
-  template <size_t BlockSize>
-  /**
-   * @brief Initialize stealer shared state and cluster queue mapping.
-   * @param local_queue Pointer to this block's CTA queue.
-   * @param state Pointer to the stealer shared state.
-   * @note Expected to be called once per block before the main loop.
-   */
-  __device__ void init(clutra::detail::utils::SharedQueue<BlockSize>*, SharedState<BlockSize>&) const;
+  template <size_t BlockSize, typename BuildDescriptorFn>
+  __device__ void init(SharedState<BlockSize>& state, BuildDescriptorFn&& build_descriptor) const;
+
+  template <size_t BlockSize, typename ProcessStealFn>
+  __device__ void runLocalStealLoop(SharedState<BlockSize>& state, int chunk_size, ProcessStealFn&& process) const;
 
   template <size_t BlockSize>
-  /**
-   * @brief Initialize block-mapped queue mapping for local stealing.
-   */
-  __device__ void initBlockMapped(clutra::detail::utils::SharedQueueBlockMapped<BlockSize>*,
-                                  SharedState<BlockSize>&) const;
-
-  template <size_t BlockSize>
-  /**
-   * @brief Attempt to steal a chunk from a victim block.
-   * @param state Pointer to the stealer shared state.
-   * @param chunk_size Requested number of items to steal (implementation may
-   * clamp).
-   * @return 0 if no work was stolen; otherwise the number of items stolen.
-   * @note This method is responsible for selecting the victim and performing
-   * atomics.
-   */
-  __device__ int attemptStealing(SharedState<BlockSize>&, int) const;
-
-  template <size_t BlockSize>
-  /**
-   * @brief Attempt to steal block-mapped chunks from a victim block.
-   */
-  __device__ int attemptStealingBlockMapped(SharedState<BlockSize>&, int) const;
-
-  template <size_t BlockSize>
-  /**
-   * @brief Read the i-th stolen item (vertex, degree) from the current victim.
-   * @param state Pointer to the stealer shared state.
-   * @param i Index within the stolen chunk [0, steal_count).
-   * @param vertex Output vertex.
-   * @param degree Output degree.
-   * @note Calling this before a successful attemptStealing results in a no-op.
-   */
-  __device__ void steal(SharedState<BlockSize>&, int, uint32_t&, uint32_t&) const;
-
-  template <size_t BlockSize>
-  /**
-   * @brief Read the i-th stolen block-mapped chunk from the current victim.
-   */
-  __device__ void stealBlockMapped(SharedState<BlockSize>&, int, uint32_t&, uint32_t&, uint32_t&) const;
-
-  template <size_t BlockSize>
-  /**
-   * @brief Finalize stealing for the block (e.g., cluster sync).
-   */
   __device__ void finalize() const;
 
   template <size_t BlockSize>
-  /**
-   * @brief Set local readiness for stealing (victims advertise readiness).
-   * @param state Pointer to the stealer shared state.
-   * @param ready True when this block's queue is initialized and ready.
-   */
   __device__ void setReady(SharedState<BlockSize>&, bool) const;
-
-  template <size_t BlockSize>
-  /**
-   * @brief Set local readiness for block-mapped local stealing.
-   */
-  __device__ void setReadyBlockMapped(SharedState<BlockSize>&, bool) const;
 };
 
 struct NullStealerDevice : StealerDevice {
   using StealerDevice::StealerDevice;
 
   template <size_t BlockSize>
-  /**
-   * @brief No-op shared state for NullStealerDevice.
-   */
   struct SharedState : StealerDevice::SharedState<BlockSize> {};
 
-  template <size_t BlockSize>
-  /**
-   * @brief No-op init for NullStealerDevice.
-   */
-  __device__ void init(clutra::detail::utils::SharedQueue<BlockSize>* local_queue,
-                       SharedState<BlockSize>& state) const {}
+  template <size_t BlockSize, typename BuildDescriptorFn>
+  __device__ void init(SharedState<BlockSize>& state, BuildDescriptorFn&& build_descriptor) const {
+    (void)state;
+    (void)build_descriptor;
+  }
 
-  template <size_t BlockSize>
-  __device__ void initBlockMapped(clutra::detail::utils::SharedQueueBlockMapped<BlockSize>* local_queue,
-                                  SharedState<BlockSize>& state) const {}
-
-  template <size_t BlockSize>
-  /**
-   * @brief No-op stealing attempt for NullStealerDevice.
-   */
-  __device__ int attemptStealing(SharedState<BlockSize>& state, int chunk_size) const {
-    return 0;
+  template <size_t BlockSize, typename ProcessStealFn>
+  __device__ void runLocalStealLoop(SharedState<BlockSize>& state, int chunk_size, ProcessStealFn&& process) const {
+    (void)state;
+    (void)chunk_size;
+    (void)process;
   }
 
   template <size_t BlockSize>
-  __device__ int attemptStealingBlockMapped(SharedState<BlockSize>& state, int chunk_size) const {
-    return 0;
-  }
-
-  template <size_t BlockSize>
-  /**
-   * @brief No-op steal for NullStealerDevice.
-   */
-  __device__ void steal(SharedState<BlockSize>& state, int i, uint32_t&, uint32_t&) const {}
-
-  template <size_t BlockSize>
-  __device__ void
-  stealBlockMapped(SharedState<BlockSize>& state, int i, uint32_t&, uint32_t&, uint32_t&) const {}
-
-  template <size_t BlockSize>
-  /**
-   * @brief No-op finalize for NullStealerDevice.
-   */
   __device__ void finalize() const {}
 
   template <size_t BlockSize>
-  /**
-   * @brief No-op ready setter for NullStealerDevice.
-   */
-  __device__ void setReady(SharedState<BlockSize>& state, bool ready) const {}
-
-  template <size_t BlockSize>
-  __device__ void setReadyBlockMapped(SharedState<BlockSize>& state, bool ready) const {}
+  __device__ void setReady(SharedState<BlockSize>& state, bool ready) const {
+    (void)state;
+    (void)ready;
+  }
 };
 
 struct BasicStealerDevice : StealerDevice {
   using StealerDevice::StealerDevice;
 
   template <size_t BlockSize>
-  /**
-   * @brief Shared state for BasicStealerDevice (victim info + cluster queues).
-   */
   struct SharedState : StealerDevice::SharedState<BlockSize> {
     int16_t victim_rank;
     int16_t steal_count;
@@ -201,55 +100,158 @@ struct BasicStealerDevice : StealerDevice {
     int is_ready;
     bool* is_finished_ptr[8];
     int* is_ready_ptr[8];
-    clutra::detail::utils::SharedQueue<BlockSize>* cluster_queues[8];
-    clutra::detail::utils::SharedQueueBlockMapped<BlockSize>* cluster_block_mapped_queues[8];
+    StealQueueDescriptor queues[8];
   };
 
-  template <size_t BlockSize>
-  /**
-   * @brief Initialize cluster queue mapping for BasicStealerDevice.
-   */
-  __device__ void init(clutra::detail::utils::SharedQueue<BlockSize>* local_queue, SharedState<BlockSize>& state) const;
+  template <size_t BlockSize, typename BuildDescriptorFn>
+  __device__ void init(SharedState<BlockSize>& state, BuildDescriptorFn&& build_descriptor) const;
+
+  template <size_t BlockSize, typename ProcessStealFn>
+  __device__ void runLocalStealLoop(SharedState<BlockSize>& state, int chunk_size, ProcessStealFn&& process) const;
 
   template <size_t BlockSize>
-  __device__ void initBlockMapped(clutra::detail::utils::SharedQueueBlockMapped<BlockSize>* local_queue,
-                                  SharedState<BlockSize>& state) const;
-
-  template <size_t BlockSize>
-  /**
-   * @brief Attempt to steal a chunk from another block.
-   */
-  __device__ int attemptStealing(SharedState<BlockSize>& state, int chunk_size) const;
-
-  template <size_t BlockSize>
-  __device__ int attemptStealingBlockMapped(SharedState<BlockSize>& state, int chunk_size) const;
-
-  template <size_t BlockSize>
-  /**
-   * @brief Fetch the i-th stolen item from the current victim.
-   * @note Calling this before a successful attemptStealing results in a no-op.
-   */
-  __device__ void steal(SharedState<BlockSize>& state, int i, uint32_t&, uint32_t&) const;
-
-  template <size_t BlockSize>
-  __device__ void stealBlockMapped(SharedState<BlockSize>& state, int i, uint32_t&, uint32_t&, uint32_t&) const;
-
-  template <size_t BlockSize>
-  /**
-   * @brief Finalize stealing for the block (e.g., cluster sync).
-   */
   __device__ void finalize() const;
 
   template <size_t BlockSize>
-  /**
-   * @brief Set local readiness for stealing.
-   * @param state Pointer to the stealer shared state.
-   * @param ready True when this block's queue is initialized and ready.
-   */
   __device__ void setReady(SharedState<BlockSize>& state, bool ready) const;
-
-  template <size_t BlockSize>
-  __device__ void setReadyBlockMapped(SharedState<BlockSize>& state, bool ready) const;
 };
+
+template <size_t BlockSize, typename BuildDescriptorFn>
+__device__ void StealerDevice::init(SharedState<BlockSize>& state, BuildDescriptorFn&& build_descriptor) const {
+  (void)state;
+  (void)build_descriptor;
+}
+
+template <size_t BlockSize, typename ProcessStealFn>
+__device__ void
+StealerDevice::runLocalStealLoop(SharedState<BlockSize>& state, int chunk_size, ProcessStealFn&& process) const {
+  (void)state;
+  (void)chunk_size;
+  (void)process;
+}
+
+template <size_t BlockSize>
+__device__ void StealerDevice::finalize() const {}
+
+template <size_t BlockSize>
+__device__ void StealerDevice::setReady(SharedState<BlockSize>&, bool) const {}
+
+template <size_t BlockSize, typename BuildDescriptorFn>
+__device__ void BasicStealerDevice::init(SharedState<BlockSize>& state, BuildDescriptorFn&& build_descriptor) const {
+#if __CUDA_ARCH__ >= 900
+  auto cluster = cooperative_groups::this_cluster();
+  cluster.sync();
+
+  state.is_finished = false;
+  state.is_ready = 0;
+  state.victim_rank = -1;
+  state.steal_count = 0;
+
+  for (int i = 0; i < cluster.dim_blocks().x; ++i) {
+    state.is_finished_ptr[i] = cluster.map_shared_rank(&state.is_finished, i);
+    state.is_ready_ptr[i] = cluster.map_shared_rank(&state.is_ready, i);
+    state.queues[i] = build_descriptor(cluster, i);
+  }
+#else
+  (void)state;
+  (void)build_descriptor;
+#endif
+}
+
+template <size_t BlockSize, typename ProcessStealFn>
+__device__ void
+BasicStealerDevice::runLocalStealLoop(SharedState<BlockSize>& state, int chunk_size, ProcessStealFn&& process) const {
+#if __CUDA_ARCH__ >= 900
+  if (chunk_size < 1) {
+    chunk_size = 1;
+  }
+
+  auto block = cooperative_groups::this_thread_block();
+  while (true) {
+    state.is_finished = true;
+
+    cooperative_groups::invoke_one(block, [&]() {
+      auto cluster = cooperative_groups::this_cluster();
+      while (true) {
+        state.steal_count = 0;
+        state.victim_rank = -1;
+        bool all_finished = true;
+
+        for (int16_t victim_offset = 1; victim_offset < cluster.dim_blocks().x; ++victim_offset) {
+          const int16_t victim_rank = (cluster.block_rank() + victim_offset) % cluster.dim_blocks().x;
+          auto* victim_ready_ptr = state.is_ready_ptr[victim_rank];
+          auto* victim_finished_ptr = state.is_finished_ptr[victim_rank];
+
+          if (!(*victim_finished_ptr)) {
+            all_finished = false;
+          } else {
+            continue;
+          }
+
+          if (atomicAdd(victim_ready_ptr, 0) == 0) {
+            all_finished = false;
+            continue;
+          }
+
+          auto& victim_desc = state.queues[victim_rank];
+          cuda::atomic_ref<int, cuda::thread_scope_device> head_ref(*victim_desc.head);
+          cuda::atomic_ref<int, cuda::thread_scope_device> tail_ref(*victim_desc.tail);
+          const int head_snapshot = head_ref.load(cuda::memory_order_relaxed);
+          const int tail_snapshot = tail_ref.load(cuda::memory_order_relaxed);
+          const int available = tail_snapshot - head_snapshot;
+
+          if (available > chunk_size) {
+            if (atomicCAS(victim_desc.tail, tail_snapshot, tail_snapshot - chunk_size) != tail_snapshot) {
+              continue;
+            }
+            state.steal_tail = tail_snapshot;
+            state.steal_count = chunk_size;
+            state.victim_rank = victim_rank;
+            break;
+          }
+        }
+
+        if (state.steal_count > 0 || all_finished) {
+          break;
+        }
+      }
+    });
+
+    block.sync();
+    const int steal_count = state.steal_count;
+    if (steal_count == 0) {
+      break;
+    }
+
+    const auto& victim_desc = state.queues[state.victim_rank];
+    const int steal_begin_index = state.steal_tail - state.steal_count;
+    for (int i = 0; i < steal_count; ++i) {
+      process(victim_desc, steal_begin_index + i, i, steal_count);
+    }
+    __syncthreads();
+  }
+#else
+  (void)state;
+  (void)chunk_size;
+  (void)process;
+#endif
+}
+
+template <size_t BlockSize>
+__device__ void BasicStealerDevice::finalize() const {
+#if __CUDA_ARCH__ >= 900
+  cooperative_groups::this_cluster().sync();
+#endif
+}
+
+template <size_t BlockSize>
+__device__ void BasicStealerDevice::setReady(SharedState<BlockSize>& state, bool ready) const {
+#if __CUDA_ARCH__ >= 900
+  atomicExch(&state.is_ready, ready ? 1 : 0);
+#else
+  (void)state;
+  (void)ready;
+#endif
+}
 
 }  // namespace clutra::stealer
