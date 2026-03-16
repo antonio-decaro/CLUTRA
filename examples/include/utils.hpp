@@ -24,6 +24,7 @@ struct Options {
   bool profiling_detail = false;
   bool binary_format = false;
   bool matrix_market = false;
+  bool measure_work = false;
   bool undirected = false;
   bool local_stealing = false;
   bool global_stealing = false;
@@ -56,6 +57,7 @@ inline CLIHandles configureBaseCLI(CLI::App& app, Options& opts) {
   app.add_flag("-p,--print", opts.print_output, "Print algorithm output to stdout");
   app.add_flag("-v,--validate", opts.validate, "Validate algorithm output against CPU implementation");
   app.add_flag("-D,--detail", opts.profiling_detail, "Print detailed profiling info (per-event timings)");
+  app.add_flag("--measure-work", opts.measure_work, "Measure the amount of work done by the algorithm (number of edges traversed)");
   app.add_flag("-u,--undirected", opts.undirected, "Treat input COO as an undirected graph");
   handles.cluster_size_opt = app.add_option("-c,--cluster-size", opts.cluster_size,
                                             "Set the cluster size for intra-cluster work stealing (default: 4)");
