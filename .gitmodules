@@ -2,3 +2,6 @@
 	path = frameworks/gunrock
 	url = https://github.com/gunrock/gunrock.git
 	branch = develop
+[submodule "frameworks/wetric"]
+	path = frameworks/wetric
+	url = https://github.com/jeffreyspaan/wedge-parallel-triangle-counting.git

@@ -25,7 +25,7 @@ struct MergePathsFunctor {
     if (!directed && u >= v) {
       return false;  // Process each edge only once
     }
-    if (thread_work.work != nullptr && thread_work.edge_count != nullptr) {
+    if (thread_work.edge_count != nullptr) {
       thread_work.work[threadIdx.x + blockIdx.x * blockDim.x] += graph_dev.getDegree(u) + graph_dev.getDegree(v);
       thread_work.edge_count[threadIdx.x + blockIdx.x * blockDim.x] += 1;
     }
@@ -33,8 +33,12 @@ struct MergePathsFunctor {
     auto src_end = graph_dev.end(u);
     auto dst_it = graph_dev.begin(v);
     auto dst_end = graph_dev.end(v);
+    uint local_work = 0;
     int local_triangles = 0;
     while (src_it != src_end && dst_it != dst_end) {
+      if (thread_work.work != nullptr) {
+        local_work++;
+      }
       if (*src_it == *dst_it) {
         ++local_triangles;
         ++src_it;
@@ -44,6 +48,9 @@ struct MergePathsFunctor {
       } else {
         ++dst_it;
       }
+    }
+    if (thread_work.work != nullptr) {
+      thread_work.work[threadIdx.x + blockIdx.x * blockDim.x] += local_work;
     }
     if (local_triangles > 0) {
       atomicAdd(&edges[u], local_triangles);
@@ -170,10 +177,8 @@ int main(int argc, char** argv) {
   CLI::App app{"CLUTRA Triangle Counting (TC)"};
   auto cli_handles = configureBaseCLI(app, opts);
   std::string tc_method = "merge";
-  bool measure_work = false;
   app.add_option("--method", tc_method, "Triangle counting method: merge or binary (default: merge)")
       ->check(CLI::IsMember({"merge", "binary"}));
-  app.add_flag("--measure-work", measure_work, "Measure work distribution across threads");
   CLI11_PARSE(app, argc, argv);
   finalizeGraphOptions(opts, cli_handles);
 
@@ -202,7 +207,7 @@ int main(int argc, char** argv) {
   CUDA_CHECK(cudaMemset(edges, 0, sizeof(int) * graph.getVertexCount()));
 
   ThreadWork thread_work{nullptr, nullptr};
-  if (measure_work) {
+  if (opts.measure_work) {
     std::cout << "[*] Measuring work distribution across threads" << std::endl;
     CUDA_CHECK(cudaMalloc(&thread_work.work, sizeof(size_t) * MAX_THREADS));
     CUDA_CHECK(cudaMalloc(&thread_work.edge_count, sizeof(size_t) * MAX_THREADS));
@@ -247,7 +252,7 @@ int main(int argc, char** argv) {
 
   cudaFree(edges);
 
-  if (measure_work) {
+  if (opts.measure_work) {
     std::vector<size_t> h_work_per_thread(MAX_THREADS);
     std::vector<size_t> h_edges_per_thread(MAX_THREADS);
     cudaMemcpy(h_work_per_thread.data(), thread_work.work, sizeof(size_t) * MAX_THREADS, cudaMemcpyDeviceToHost);

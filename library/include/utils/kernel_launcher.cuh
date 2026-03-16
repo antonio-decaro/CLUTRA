@@ -7,6 +7,7 @@
 
 #include "misc.cuh"
 #include <cuda_runtime.h>
+#include <stealer/stealer.cuh>
 
 namespace clutra::detail::kernels {
 
@@ -75,6 +76,17 @@ launchClusterKernel(const LaunchConfig& config, const size_t& dynamic_smem_bytes
                           args...);
 }
 
+template <typename DerivedStealerT, typename DeviceStealerT>
+inline void adjustLaunchConfig(LaunchConfig& config,
+                               const size_t workload_size,
+                               clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer) {
+  if (stealer.isInterClusterStealingEnabled() || stealer.isInterClusterStealingEnabled()) {
+    if (workload_size < config.grid_size * 4) {
+      config.cluster_size = 1;
+    }
+  }
+}
+
 /**
  * Fetch the cluster size for intra-cluster work stealing.
  * If intra-cluster work stealing is disabled, return 1.
@@ -83,13 +95,12 @@ launchClusterKernel(const LaunchConfig& config, const size_t& dynamic_smem_bytes
  * @param preferred_block_size Preferred block size.
  * @param preferred_cluster_size Preferred cluster size (will be modified if needed).
  * @param workload_size Total workload size.
- * @param stealer Stealer object to check if intra-cluster stealing is enabled.
  * @return LaunchConfig: Adjusted LaunchConfig with grid size, block size, and cluster size.
  */
-inline LaunchConfig adjustLaunchConfig(const size_t& preferred_grid_size,
-                                       const size_t& preferred_block_size,
-                                       const size_t& preferred_cluster_size,
-                                       const size_t& workload_size) {
+inline LaunchConfig fetchLaunchConfig(const size_t& preferred_grid_size,
+                                      const size_t& preferred_block_size,
+                                      const size_t& preferred_cluster_size,
+                                      const size_t& workload_size) {
   size_t grid_size = preferred_grid_size;
   size_t block_size = preferred_block_size;
   size_t cluster_size = preferred_cluster_size;

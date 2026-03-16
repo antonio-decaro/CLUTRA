@@ -10,7 +10,7 @@ namespace clutra::detail {
 
 template <typename... Args>
 inline void log(std::string_view message, Args&&... args) {
-  if (std::getenv("CLUTRA_LOGGING") == nullptr) {
+  if (std::getenv("CLUTRA_DEBUG") == nullptr) {
     return;
   }
 

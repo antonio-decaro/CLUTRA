@@ -2,8 +2,7 @@
 #include <clutra.hpp>
 #include <iostream>
 
-// Prevents the compiler from optimizing away synthetic work in the BFS kernel.
-__device__ unsigned long long g_work_sink = 0;
+constexpr size_t MAX_THREADS = 1 << 20;
 
 template <typename GraphT>
 bool validate(const GraphT& graph, const int* device_distances, const uint source) {
@@ -71,8 +70,14 @@ int main(int argc, char** argv) {
   }
 
   int* distances;
-  cudaMallocManaged(&distances, graph.getVertexCount() * sizeof(int));
-  cudaMemset(distances, -1, graph.getVertexCount() * sizeof(int));
+  CUDA_CHECK(cudaMallocManaged(&distances, graph.getVertexCount() * sizeof(int)));
+  CUDA_CHECK(cudaMemset(distances, -1, graph.getVertexCount() * sizeof(int)));
+
+  size_t* work;
+  if (opts.measure_work) {
+    CUDA_CHECK(cudaMallocManaged(&work, MAX_THREADS * sizeof(size_t)));
+    CUDA_CHECK(cudaMemset(work, 0, MAX_THREADS * sizeof(size_t)));
+  }
 
   distances[opts.source] = 0;
   in_frontier.insert(opts.source);
@@ -84,15 +89,18 @@ int main(int argc, char** argv) {
   std::cout << "[*] Running BFS from source vertex " << opts.source << std::endl;
   while (!in_frontier.empty()) {
     // std::cout << "[*] BFS Iteration " << iter << ", Frontier Size: " << in_frontier.getOutDegree(graph) << std::endl;
-    clutra::operators::advance::push(graph, in_frontier, out_frontier, stealer,
-                                     clutra::operators::advance::load_balance::block_mapped,
-                                     [iter, distances] __device__(auto u, auto v, auto e, auto w) {
-                                       if (distances[v] == -1) {
-                                         distances[v] = iter + 1;
-                                         return true;
-                                       }
-                                       return false;
-                                     });
+    clutra::operators::advance::push(
+        graph, in_frontier, out_frontier, stealer, clutra::operators::advance::load_balance::block_mapped,
+        [iter, distances, work, measure_work = opts.measure_work] __device__(auto u, auto v, auto e, auto w) {
+          if (measure_work) {
+            work[blockIdx.x * blockDim.x + threadIdx.x]++;
+          }
+          if (distances[v] == -1) {
+            distances[v] = iter + 1;
+            return true;
+          }
+          return false;
+        });
 
     clutra::frontier::FrontierMLB<uint32_t>::swap(in_frontier, out_frontier);
     out_frontier.clear();
@@ -116,6 +124,13 @@ int main(int argc, char** argv) {
   }
 
   cudaFree(distances);
+
+  if (opts.measure_work) {
+    std::vector<size_t> h_work_per_thread(MAX_THREADS);
+    CUDA_CHECK(cudaMemcpy(h_work_per_thread.data(), work, sizeof(size_t) * MAX_THREADS, cudaMemcpyDeviceToHost));
+    cudaFree(work);
+    printArray(h_work_per_thread, "Work per thread: ");
+  }
 
   clutra::profile::KernelProfilerManager::instance().printSummary(opts.profiling_detail);
 }

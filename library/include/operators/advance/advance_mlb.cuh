@@ -63,7 +63,7 @@ void launchKernelBucketing(const GraphT& graph,
       advanceKernel<view::frontier, Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier),
                     frontier::detail::NullFrontierDevice, LockType, decltype(stealer.getDeviceStealer()), LambdaT>);
   const size_t cluster_size = stealer.getPreferredClusterSize();
-  auto launch_config = clutra::detail::kernels::adjustLaunchConfig(grid_size, block_size, cluster_size, work_tiles);
+  auto launch_config = clutra::detail::kernels::fetchLaunchConfig(grid_size, block_size, cluster_size, work_tiles);
 
   const uint32_t num_clusters = static_cast<uint32_t>(launch_config.grid_size / launch_config.cluster_size);
   const uint32_t tiles_per_cluster =
@@ -147,7 +147,7 @@ void launchKernelBlockMapped(const GraphT& graph,
                                frontier::detail::NullFrontierDevice, LockType, decltype(stealer.getDeviceStealer()),
                                LambdaT>);
   const size_t cluster_size = stealer.getPreferredClusterSize();
-  auto launch_config = clutra::detail::kernels::adjustLaunchConfig(grid_size, block_size, cluster_size, work_tiles);
+  auto launch_config = clutra::detail::kernels::fetchLaunchConfig(grid_size, block_size, cluster_size, work_tiles);
 
   const uint32_t num_clusters = static_cast<uint32_t>(launch_config.grid_size / launch_config.cluster_size);
   const uint32_t tiles_per_cluster =
@@ -272,7 +272,7 @@ void launchKernelGraphBucketing(const GraphT& graph,
       advanceKernel<view::graph, Direction, CU_SIZE, decltype(graph_dev), frontier::detail::NullFrontierDevice,
                     frontier::detail::NullFrontierDevice, LockType, decltype(stealer.getDeviceStealer()), LambdaT>);
   const size_t cluster_size = stealer.getPreferredClusterSize();
-  auto launch_config = clutra::detail::kernels::adjustLaunchConfig(grid_size, block_size, cluster_size, work_tiles);
+  auto launch_config = clutra::detail::kernels::fetchLaunchConfig(grid_size, block_size, cluster_size, work_tiles);
 
   const size_t num_clusters = launch_config.grid_size / launch_config.cluster_size;
   const size_t tiles_per_cluster = work_tiles == 0 ? 1 : (work_tiles + num_clusters - 1) / num_clusters;
@@ -348,7 +348,7 @@ void launchKernelGraphBlockMapped(const GraphT& graph,
                                frontier::detail::NullFrontierDevice, frontier::detail::NullFrontierDevice, LockType,
                                decltype(stealer.getDeviceStealer()), LambdaT>);
   const size_t cluster_size = stealer.getPreferredClusterSize();
-  auto launch_config = clutra::detail::kernels::adjustLaunchConfig(grid_size, block_size, cluster_size, work_tiles);
+  auto launch_config = clutra::detail::kernels::fetchLaunchConfig(grid_size, block_size, cluster_size, work_tiles);
 
   const size_t num_clusters = launch_config.grid_size / launch_config.cluster_size;
   const size_t tiles_per_cluster = work_tiles == 0 ? 1 : (work_tiles + num_clusters - 1) / num_clusters;
