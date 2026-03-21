@@ -180,6 +180,35 @@ runLocalStealLoop(GraphDevT graph_dev,
       });
 }
 
+template <view View,
+          advance_direction Direction,
+          size_t BlockSize,
+          graph::detail::DeviceGraphConcept GraphDevT,
+          typename InFrontierDevT,
+          typename OutFrontierDevT,
+          typename StealerDeviceT,
+          typename LambdaT>
+__device__ __forceinline__ void processTileStream(GraphDevT graph_dev,
+                                                  InFrontierDevT in_dev_frontier,
+                                                  OutFrontierDevT out_dev_frontier,
+                                                  int coarsening_factor,
+                                                  size_t work_tiles,
+                                                  uint32_t stream_base,
+                                                  clutra::detail::utils::SharedQueue<BlockSize>& cta_queue,
+                                                  clutra::detail::utils::SharedQueue<ADVANCE_WARP_SIZE>& warp_queue,
+                                                  StealerDeviceT stealer,
+                                                  typename StealerDeviceT::template SharedState<BlockSize>& stealer_state,
+                                                  LambdaT functor,
+                                                  int tid,
+                                                  int lane,
+                                                  int block_dim) {
+  for (size_t tile = static_cast<size_t>(stream_base); tile < work_tiles; tile += static_cast<size_t>(gridDim.x)) {
+    processTile<View, Direction, BlockSize>(graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor,
+                                            static_cast<uint32_t>(tile), cta_queue, warp_queue, stealer, stealer_state,
+                                            functor, tid, lane, block_dim);
+  }
+}
+
 template <size_t BlockSize>
 size_t getAdvanceSharedMemorySize(size_t stealer_shared_size) {
   size_t shared_size = 0;
@@ -193,37 +222,12 @@ size_t getAdvanceSharedMemorySize(size_t stealer_shared_size) {
   return shared_size;
 }
 
-template <typename WorkQueue>
-__device__ __forceinline__ void populateClusterQueue(WorkQueue& cluster_queue, size_t work_tiles) {
-  if (threadIdx.x == 0) {
-#if __CUDA_ARCH__ >= 900
-    auto cluster = cooperative_groups::this_cluster();
-    if (cluster.block_rank() == 0) {
-      const uint32_t cluster_size = static_cast<uint32_t>(cluster.dim_blocks().x);
-      const uint32_t cluster_idx = static_cast<uint32_t>(blockIdx.x / cluster_size);
-      const uint32_t num_clusters = static_cast<uint32_t>(gridDim.x / cluster_size);
-      for (uint32_t i = cluster_idx; i < work_tiles; i += num_clusters) {
-        cluster_queue.push(i);
-      }
-    }
-#else
-    for (uint32_t i = static_cast<uint32_t>(blockIdx.x); i < work_tiles; i += static_cast<uint32_t>(gridDim.x)) {
-      cluster_queue.push(i);
-    }
-#endif
-  }
-#if __CUDA_ARCH__ >= 900
-  cooperative_groups::this_cluster().sync();
-#endif
-}
-
 template <view View,
           advance_direction Direction,
           size_t BlockSize,
           graph::detail::DeviceGraphConcept GraphDevT,
           typename InFrontierDevT,
           typename OutFrontierDevT,
-          typename LockType,
           typename StealerDeviceT,
           typename LambdaT>
 __global__ void advanceKernel(GraphDevT graph_dev,
@@ -231,7 +235,6 @@ __global__ void advanceKernel(GraphDevT graph_dev,
                               OutFrontierDevT out_dev_frontier,
                               int coarsening_factor,
                               size_t work_tiles,
-                              clutra::detail::utils::WorkQueueView<uint32_t, LockType>* cluster_work_queues,
                               StealerDeviceT stealer,
                               LambdaT functor) {
   static_assert(BlockSize % ADVANCE_WARP_SIZE == 0, "BlockSize must be multiple of warp size");
@@ -245,13 +248,9 @@ __global__ void advanceKernel(GraphDevT graph_dev,
   const int lane = tid & (ADVANCE_WARP_SIZE - 1);
   const int block_dim = blockDim.x;
   auto& warp_queue = warp_queues[warp_id];
-  auto& cluster_queue = clutra::detail::utils::getCurrentClusterQueueView(cluster_work_queues);
-  __shared__ uint32_t global_steal_state;
-
-  if (tid == 0) {
-    global_steal_state = 0;
-  }
-  __syncthreads();
+  __shared__ uint4 cancel_result;
+  __shared__ uint64_t cancel_barrier;
+  int cancel_phase = 0;
 
   if (stealer.isIntraClusterStealingEnabled()) {
     stealer.template init<BlockSize>(stealer_state, [&](auto& cluster, int rank) {
@@ -261,49 +260,31 @@ __global__ void advanceKernel(GraphDevT graph_dev,
     });
   }
 
-  populateClusterQueue(cluster_queue, work_tiles);
+  const bool use_cancel_based_global_steal = stealer.isInterClusterStealingEnabled() && hasPtxClusterLaunchControlApi();
+  if (use_cancel_based_global_steal) {
+    initClusterLaunchControl(cancel_barrier);
+  }
 
-  // uint32_t tile = 0;
-  // bool has_tile = false;
-  __shared__ uint32_t tile;
+  uint32_t stream_base = static_cast<uint32_t>(blockIdx.x);
   while (true) {
-    if (tid == 0 && !cluster_queue.pop(tile)) {
-      tile = UINT32_MAX;
-    }
-    __syncthreads();
-    if (tile == UINT32_MAX) {
-      break;
-    }
-    processTile<View, Direction, BlockSize>(graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, tile,
-                                            cta_queue, warp_queue, stealer, stealer_state, functor, tid, lane,
-                                            block_dim);
-  }
-  if (stealer.isIntraClusterStealingEnabled()) {
-    runLocalStealLoop<Direction, BlockSize>(graph_dev, out_dev_frontier, stealer, stealer_state, functor, tid,
-                                            block_dim);
-  }
+    processTileStream<View, Direction, BlockSize>(graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor,
+                                                  work_tiles, stream_base, cta_queue, warp_queue, stealer,
+                                                  stealer_state, functor, tid, lane, block_dim);
 
-  while (stealer.isInterClusterStealingEnabled()) {
-    const bool has_new_work = tryGlobalClusterSteal(cluster_queue, cluster_work_queues, stealer, global_steal_state);
-    if (!has_new_work) {
-      break;
-    }
-    while (true) {
-      if (tid == 0 && !cluster_queue.pop(tile)) {  // Short circuit if no tile to steal
-        tile = UINT32_MAX;
-      }
-      __syncthreads();
-      if (tile == UINT32_MAX) {
-        break;
-      }
-      processTile<View, Direction, BlockSize>(graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, tile,
-                                              cta_queue, warp_queue, stealer, stealer_state, functor, tid, lane,
-                                              block_dim);
-    }
     if (stealer.isIntraClusterStealingEnabled()) {
       runLocalStealLoop<Direction, BlockSize>(graph_dev, out_dev_frontier, stealer, stealer_state, functor, tid,
                                               block_dim);
     }
+
+    if (!use_cancel_based_global_steal) {
+      break;
+    }
+
+    uint32_t next_stream_base = 0;
+    if (!tryAcquireCanceledCta(cancel_result, cancel_barrier, cancel_phase, next_stream_base)) {
+      break;
+    }
+    stream_base = next_stream_base;
   }
 
   stealer.template finalize<BlockSize>();

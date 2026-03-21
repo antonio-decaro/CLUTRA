@@ -25,6 +25,14 @@ inline bool isClusterLaunchSupported(int device = 0) {
   return cluster_supported != 0;
 }
 
+inline bool isClusterLaunchControlSupported(int device = 0) {
+  int cc_major = 0;
+  int cluster_supported = 0;
+  CUDA_CHECK(cudaDeviceGetAttribute(&cc_major, cudaDevAttrComputeCapabilityMajor, device));
+  CUDA_CHECK(cudaDeviceGetAttribute(&cluster_supported, cudaDevAttrClusterLaunch, device));
+  return (cc_major >= 10) && (cluster_supported != 0);
+}
+
 template <typename KernelT, typename... Args>
 inline void launchClusterKernelImpl(size_t grid_size,
                                     size_t block_size,

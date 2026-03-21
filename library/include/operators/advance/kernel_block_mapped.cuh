@@ -327,7 +327,49 @@ template <view View,
           graph::detail::DeviceGraphConcept GraphDevT,
           typename InFrontierDevT,
           typename OutFrontierDevT,
-          typename LockType,
+          typename StealerDeviceT,
+          typename LambdaT>
+__device__ __forceinline__ void processBlockMappedStream(
+    GraphDevT graph_dev,
+    InFrontierDevT in_dev_frontier,
+    OutFrontierDevT out_dev_frontier,
+    int coarsening_factor,
+    size_t work_tiles,
+    uint32_t stream_base,
+    clutra::detail::utils::SharedQueueBlockMapped<BlockSize>& cta_queue,
+    BlockMappedStealTask* steal_tasks,
+    StealerDeviceT stealer,
+    typename StealerDeviceT::template SharedState<BlockSize>& stealer_state,
+    uint32_t* vertices,
+    uint32_t* start_edges,
+    uint32_t* scan_begins,
+    uint32_t* scan_ends,
+    uint32_t* total_edges,
+    uint32_t* lease_scratch,
+    typename cub::BlockScan<uint32_t, BlockSize>::TempStorage& scan_storage,
+    LambdaT functor,
+    int tid,
+    int block_dim) {
+  for (size_t tile = static_cast<size_t>(stream_base); tile < work_tiles; tile += static_cast<size_t>(gridDim.x)) {
+    if (stealer.isIntraClusterStealingEnabled()) {
+      processBlockMappedTileWithLocalStealing<View, Direction, BlockSize>(
+          graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, static_cast<uint32_t>(tile), cta_queue,
+          steal_tasks, stealer, stealer_state, functor, vertices, start_edges, scan_begins, scan_ends, total_edges,
+          lease_scratch, scan_storage, tid, block_dim);
+    } else {
+      processBlockMappedTile<View, Direction, BlockSize>(
+          graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, static_cast<uint32_t>(tile), functor,
+          vertices, start_edges, scan_begins, scan_ends, total_edges, scan_storage, tid, block_dim);
+    }
+  }
+}
+
+template <view View,
+          advance_direction Direction,
+          size_t BlockSize,
+          graph::detail::DeviceGraphConcept GraphDevT,
+          typename InFrontierDevT,
+          typename OutFrontierDevT,
           typename StealerDeviceT,
           typename LambdaT>
 __global__ void advanceKernelBlockMapped(GraphDevT graph_dev,
@@ -335,7 +377,6 @@ __global__ void advanceKernelBlockMapped(GraphDevT graph_dev,
                                          OutFrontierDevT out_dev_frontier,
                                          int coarsening_factor,
                                          size_t work_tiles,
-                                         clutra::detail::utils::WorkQueueView<uint32_t, LockType>* cluster_work_queues,
                                          StealerDeviceT stealer,
                                          LambdaT functor) {
   static_assert(BlockSize % ADVANCE_WARP_SIZE == 0, "BlockSize must be multiple of warp size");
@@ -355,13 +396,9 @@ __global__ void advanceKernelBlockMapped(GraphDevT graph_dev,
 
   const int tid = threadIdx.x;
   const int block_dim = blockDim.x;
-  auto& cluster_queue = clutra::detail::utils::getCurrentClusterQueueView(cluster_work_queues);
-  __shared__ uint32_t global_steal_state;
-
-  if (tid == 0) {
-    global_steal_state = 0;
-  }
-  __syncthreads();
+  __shared__ uint4 cancel_result;
+  __shared__ uint64_t cancel_barrier;
+  int cancel_phase = 0;
 
   if (stealer.isIntraClusterStealingEnabled()) {
     stealer.template init<BlockSize>(stealer_state, [&](auto& cluster, int rank) {
@@ -372,66 +409,32 @@ __global__ void advanceKernelBlockMapped(GraphDevT graph_dev,
     });
   }
 
-  populateClusterQueue(cluster_queue, work_tiles);
+  const bool use_cancel_based_global_steal = stealer.isInterClusterStealingEnabled() && hasPtxClusterLaunchControlApi();
+  if (use_cancel_based_global_steal) {
+    initClusterLaunchControl(cancel_barrier);
+  }
 
-  __shared__ uint32_t tile;
+  uint32_t stream_base = static_cast<uint32_t>(blockIdx.x);
   while (true) {
-    if (tid == 0 && !cluster_queue.pop(tile)) {
-      tile = UINT32_MAX;
-    }
-    __syncthreads();
-    if (tile == UINT32_MAX) {
-      break;
-    }
-
-    if (stealer.isIntraClusterStealingEnabled()) {
-      processBlockMappedTileWithLocalStealing<View, Direction, BlockSize>(
-          graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, tile, cta_queue, steal_tasks, stealer,
-          stealer_state, functor, vertices, start_edges, scan_begins, scan_ends, total_edges, lease_scratch,
-          scan_storage, tid, block_dim);
-    } else {
-      processBlockMappedTile<View, Direction, BlockSize>(
-          graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, tile, functor, vertices, start_edges,
-          scan_begins, scan_ends, total_edges, scan_storage, tid, block_dim);
-    }
-  }
-
-  if (stealer.isIntraClusterStealingEnabled()) {
-    runLocalBlockMappedStealLoop<Direction, BlockSize>(graph_dev, out_dev_frontier, stealer, stealer_state,
-                                                       lease_scratch, functor, tid, block_dim);
-  }
-
-  while (stealer.isInterClusterStealingEnabled()) {
-    const bool has_new_work = tryGlobalClusterSteal(cluster_queue, cluster_work_queues, stealer, global_steal_state);
-    if (!has_new_work) {
-      break;
-    }
-
-    while (true) {
-      if (tid == 0 && !cluster_queue.pop(tile)) {
-        tile = UINT32_MAX;
-      }
-      __syncthreads();
-      if (tile == UINT32_MAX) {
-        break;
-      }
-
-      if (stealer.isIntraClusterStealingEnabled()) {
-        processBlockMappedTileWithLocalStealing<View, Direction, BlockSize>(
-            graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, tile, cta_queue, steal_tasks, stealer,
-            stealer_state, functor, vertices, start_edges, scan_begins, scan_ends, total_edges, lease_scratch,
-            scan_storage, tid, block_dim);
-      } else {
-        processBlockMappedTile<View, Direction, BlockSize>(
-            graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, tile, functor, vertices, start_edges,
-            scan_begins, scan_ends, total_edges, scan_storage, tid, block_dim);
-      }
-    }
+    processBlockMappedStream<View, Direction, BlockSize>(
+        graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor, work_tiles, stream_base, cta_queue,
+        steal_tasks, stealer, stealer_state, vertices, start_edges, scan_begins, scan_ends, total_edges,
+        lease_scratch, scan_storage, functor, tid, block_dim);
 
     if (stealer.isIntraClusterStealingEnabled()) {
       runLocalBlockMappedStealLoop<Direction, BlockSize>(graph_dev, out_dev_frontier, stealer, stealer_state,
                                                          lease_scratch, functor, tid, block_dim);
     }
+
+    if (!use_cancel_based_global_steal) {
+      break;
+    }
+
+    uint32_t next_stream_base = 0;
+    if (!tryAcquireCanceledCta(cancel_result, cancel_barrier, cancel_phase, next_stream_base)) {
+      break;
+    }
+    stream_base = next_stream_base;
   }
 
   stealer.template finalize<BlockSize>();
