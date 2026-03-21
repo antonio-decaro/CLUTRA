@@ -7,7 +7,6 @@ shift
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_PATH/utilities.sh"
 
-BENCHMARKS="measure_imbalance,triangle_counting"
 dataset_folder=""
 dataset_list=""
 enable_stealing=""
@@ -15,6 +14,7 @@ measure_work_imbalance=""
 cluster_size="-c 1"
 benchmark="measure_imbalance"
 num_runs=20
+detailed=""
 declare -A dataset_sources
 
 function print_usage {
@@ -25,6 +25,7 @@ function print_usage {
   echo "  -l    Enable work stealing intra-cluster (optional)"
   echo "  -g    Enable work stealing inter-cluster (optional)"
   echo "  -s    Enable both stealing modes (optional)"
+  echo "  -D    Enable detailed imbalance measurement (optional)"
   echo "  -w    Measure work imbalance (optional)"
   echo "  -c    Cluster size for stealing (default: 1)"
   echo "  -o    Output directory (default: $SCRIPT_DIR/out/<benchmark>)"
@@ -32,7 +33,7 @@ function print_usage {
   echo "  -h    Show this help message"
 }
 
-while getopts :hswlgc:d:f:n:o:b:S: flag
+while getopts :hswDlgc:d:f:n:o:b: flag
 do
   case "${flag}" in
     f) dataset_folder=${OPTARG};;
@@ -43,6 +44,7 @@ do
     l) enable_stealing="-t";;
     g) enable_stealing="-g";;
     w) measure_work_imbalance="--measure-work";;
+    D) detailed="-D";;
     s) enable_stealing="-t -g";;
     c) cluster_size="-c ${OPTARG} --gchunk-size=${OPTARG}";;
     n) num_runs=${OPTARG};;
@@ -52,12 +54,6 @@ do
         exit 1;;
   esac
 done
-
-if [[ ! ",$BENCHMARKS," =~ ",$benchmark," ]]; then
-  echo "Unknown benchmark: $benchmark"
-  print_usage
-  exit 1
-fi
 
 if [ -z "$out_dir" ]
 then
@@ -89,7 +85,7 @@ do
     continue
   fi
 
-  dataset_basename=$(basename "$dataset_path" .bin)
+  dataset_basename=$(basename "$dataset_default" .bin)
 
   rm -f "$out_dir/${dataset_basename}.out"
 
@@ -103,13 +99,13 @@ do
         continue
       fi
       echo "  Source: $source"
-      $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" --method merge $measure_work_imbalance $enable_stealing $cluster_size -s "$source" >> "$out_dir/${dataset_basename}.out" 2>&1
+      $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $measure_work_imbalance $enable_stealing $cluster_size -s "$source" $detailed >> "$out_dir/${dataset_basename}.out" 2>&1
     done
   else
     for ((run=1; run<=num_runs; run++))
     do
       echo "  Run $run/$num_runs"
-      $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" --method merge $measure_work_imbalance $enable_stealing $cluster_size >> "$out_dir/${dataset_basename}.out" 2>&1
+      $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $measure_work_imbalance $enable_stealing $cluster_size $detailed >> "$out_dir/${dataset_basename}.out" 2>&1
     done
   fi
 done
