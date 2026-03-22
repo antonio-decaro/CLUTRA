@@ -84,10 +84,7 @@ void launchKernelBucketing(const GraphT& graph,
   validateStealingSupport(stealer, device_id);
 
   const size_t smem = getAdvanceSharedMemorySize<CU_SIZE>(stealer.template getSharedStateSizeInBytes<CU_SIZE>());
-  const size_t grid_size = clutra::detail::device::getMaxOccupancyGridSize(
-      device_id, block_size, smem,
-      advanceKernel<view::frontier, Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier),
-                    frontier::detail::NullFrontierDevice, decltype(stealer.getDeviceStealer()), LambdaT>);
+  const size_t grid_size = work_tiles;
   const size_t cluster_size = resolveClusterSize(stealer, device_id, stealer.getPreferredClusterSize());
   auto launch_config = clutra::detail::kernels::fetchLaunchConfig(grid_size, block_size, cluster_size, work_tiles);
 
@@ -163,10 +160,7 @@ void launchKernelBlockMapped(const GraphT& graph,
   validateStealingSupport(stealer, device_id);
 
   constexpr size_t smem = 0;
-  const size_t grid_size = clutra::detail::device::getMaxOccupancyGridSize(
-      device_id, block_size, smem,
-      advanceKernelBlockMapped<view::frontier, Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier),
-                               frontier::detail::NullFrontierDevice, decltype(stealer.getDeviceStealer()), LambdaT>);
+  const size_t grid_size = work_tiles;
   const size_t cluster_size = resolveClusterSize(stealer, device_id, stealer.getPreferredClusterSize());
   auto launch_config = clutra::detail::kernels::fetchLaunchConfig(grid_size, block_size, cluster_size, work_tiles);
 
@@ -355,11 +349,7 @@ void launchKernelGraphBlockMapped(const GraphT& graph,
   validateStealingSupport(stealer, device_id);
 
   constexpr size_t smem = 0;
-  const size_t grid_size = clutra::detail::device::getMaxOccupancyGridSize(
-      device_id, block_size, smem,
-      advanceKernelBlockMapped<view::graph, Direction, CU_SIZE, decltype(graph_dev),
-                               frontier::detail::NullFrontierDevice, frontier::detail::NullFrontierDevice,
-                               decltype(stealer.getDeviceStealer()), LambdaT>);
+  const size_t grid_size = work_tiles;
   const size_t cluster_size = resolveClusterSize(stealer, device_id, stealer.getPreferredClusterSize());
   auto launch_config = clutra::detail::kernels::fetchLaunchConfig(grid_size, block_size, cluster_size, work_tiles);
 

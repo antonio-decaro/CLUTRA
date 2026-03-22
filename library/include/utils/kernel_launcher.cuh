@@ -42,6 +42,23 @@ inline void launchClusterKernelImpl(size_t grid_size,
                                     cudaStream_t stream,
                                     KernelT kernel,
                                     Args... args) {
+  if (grid_size == 0) {
+    throw std::runtime_error("Kernel launch requested with grid_size == 0.");
+  }
+  if (block_size == 0) {
+    throw std::runtime_error("Kernel launch requested with block_size == 0.");
+  }
+  if (cluster_size == 0) {
+    cluster_size = 1;
+  }
+
+  if (cluster_size > 1) {
+    const size_t remainder = grid_size % cluster_size;
+    if (remainder != 0) {
+      grid_size += (cluster_size - remainder);
+    }
+  }
+
   cudaLaunchConfig_t config = {};
   config.gridDim.x = grid_size;
   config.gridDim.y = 1;
@@ -61,13 +78,33 @@ inline void launchClusterKernelImpl(size_t grid_size,
       throw std::runtime_error("Cluster launch requested but not supported by the current device.");
     }
 
-    cudaLaunchAttribute attr[1];
-    attr[0].id = cudaLaunchAttributeClusterDimension;
-    attr[0].val.clusterDim.x = cluster_size;
-    attr[0].val.clusterDim.y = 1;
-    attr[0].val.clusterDim.z = 1;
-    config.attrs = attr;
-    config.numAttrs = 1;
+    int max_cluster_size = 0;
+    CUDA_CHECK(cudaOccupancyMaxPotentialClusterSize(&max_cluster_size, kernel, &config));
+    if (max_cluster_size <= 0) {
+      cluster_size = 1;
+    } else if (cluster_size > static_cast<size_t>(max_cluster_size)) {
+      cluster_size = static_cast<size_t>(max_cluster_size);
+    }
+
+    if (cluster_size > 1) {
+      cudaLaunchAttribute attr[1];
+      attr[0].id = cudaLaunchAttributeClusterDimension;
+      attr[0].val.clusterDim.x = cluster_size;
+      attr[0].val.clusterDim.y = 1;
+      attr[0].val.clusterDim.z = 1;
+      config.attrs = attr;
+      config.numAttrs = 1;
+      cudaError_t launch_err = cudaLaunchKernelEx(&config, kernel, args...);
+      if (launch_err == cudaErrorInvalidValue) {
+        // Fallback to a standard launch when cluster constraints are not
+        // satisfied at runtime for this kernel/configuration.
+        config.attrs = nullptr;
+        config.numAttrs = 0;
+        launch_err = cudaLaunchKernelEx(&config, kernel, args...);
+      }
+      CUDA_CHECK(launch_err);
+      return;
+    }
   } else {
     config.attrs = nullptr;
     config.numAttrs = 0;
@@ -102,7 +139,7 @@ template <typename DerivedStealerT, typename DeviceStealerT>
 inline void adjustLaunchConfig(LaunchConfig& config,
                                const size_t workload_size,
                                clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer) {
-  if (stealer.isInterClusterStealingEnabled() || stealer.isInterClusterStealingEnabled()) {
+  if (stealer.isIntraClusterStealingEnabled() || stealer.isInterClusterStealingEnabled()) {
     if (workload_size < config.grid_size * 4) {
       config.cluster_size = 1;
     }
@@ -127,11 +164,21 @@ inline LaunchConfig fetchLaunchConfig(const size_t& preferred_grid_size,
   size_t block_size = preferred_block_size;
   size_t cluster_size = preferred_cluster_size;
 
+  if (block_size == 0) {
+    throw std::runtime_error("Block size must be greater than zero.");
+  }
+
+  // Treat a zero preferred cluster size as "no clustering" instead of
+  // allowing undefined modulo-by-zero behavior.
+  if (cluster_size == 0) {
+    cluster_size = 1;
+  }
+
   if (preferred_grid_size == 0 && preferred_block_size > 0 && workload_size > 0) {
     grid_size = (workload_size + preferred_block_size - 1) / preferred_block_size;
   }
 
-  if (preferred_grid_size < cluster_size) {
+  if (grid_size < cluster_size) {
     cluster_size = 1;
   }
 
