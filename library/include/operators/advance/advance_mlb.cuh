@@ -20,17 +20,32 @@
 
 namespace clutra::operators::advance::detail {
 
-inline void validateGlobalStealingSupport(bool global_stealing_enabled, int device_id) {
-  if (!global_stealing_enabled) {
-    return;
+template <typename StealerT>
+inline void validateStealingSupport(const StealerT& stealer, int device_id) {
+  if (stealer.isIntraClusterStealingEnabled() && !clutra::detail::kernels::isClusterLaunchSupported(device_id)) {
+    throw std::runtime_error("Local stealing requires cluster launch support on the current device.");
   }
-  const bool supported =
-      hasPtxClusterLaunchControlApi() && clutra::detail::kernels::isClusterLaunchControlSupported(device_id);
-  if (!supported) {
-    throw std::runtime_error(
-        "Global stealing requires SM100+ cluster launch control support and a CUDA toolkit with cluster-launch-control "
-        "PTX APIs.");
+
+  if (stealer.isInterClusterStealingEnabled()) {
+    const bool supported =
+        hasPtxClusterLaunchControlApi() && clutra::detail::kernels::isClusterLaunchControlSupported(device_id);
+    if (!supported) {
+      throw std::runtime_error(
+          "Global stealing requires SM100+ cluster launch control support and a CUDA toolkit with "
+          "cluster-launch-control PTX APIs.");
+    }
   }
+}
+
+template <typename StealerT>
+inline size_t resolveClusterSize(const StealerT& stealer, int device_id, size_t preferred_cluster_size) {
+  if (!stealer.isIntraClusterStealingEnabled() && !stealer.isInterClusterStealingEnabled()) {
+    return 1;
+  }
+  if (!clutra::detail::kernels::isClusterLaunchSupported(device_id)) {
+    return 1;
+  }
+  return preferred_cluster_size;
 }
 
 /**
@@ -66,14 +81,14 @@ void launchKernelBucketing(const GraphT& graph,
   const size_t work_tiles = ((active_size * bitmap_range) + block_size - 1) / block_size;
   int device_id = 0;
   CUDA_CHECK(cudaGetDevice(&device_id));
-  validateGlobalStealingSupport(stealer.isInterClusterStealingEnabled(), device_id);
+  validateStealingSupport(stealer, device_id);
 
   const size_t smem = getAdvanceSharedMemorySize<CU_SIZE>(stealer.template getSharedStateSizeInBytes<CU_SIZE>());
   const size_t grid_size = clutra::detail::device::getMaxOccupancyGridSize(
       device_id, block_size, smem,
       advanceKernel<view::frontier, Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier),
                     frontier::detail::NullFrontierDevice, decltype(stealer.getDeviceStealer()), LambdaT>);
-  const size_t cluster_size = stealer.getPreferredClusterSize();
+  const size_t cluster_size = resolveClusterSize(stealer, device_id, stealer.getPreferredClusterSize());
   auto launch_config = clutra::detail::kernels::fetchLaunchConfig(grid_size, block_size, cluster_size, work_tiles);
 
   clutra::detail::log(
@@ -145,14 +160,14 @@ void launchKernelBlockMapped(const GraphT& graph,
 
   int device_id = 0;
   CUDA_CHECK(cudaGetDevice(&device_id));
-  validateGlobalStealingSupport(stealer.isInterClusterStealingEnabled(), device_id);
+  validateStealingSupport(stealer, device_id);
 
   constexpr size_t smem = 0;
   const size_t grid_size = clutra::detail::device::getMaxOccupancyGridSize(
       device_id, block_size, smem,
       advanceKernelBlockMapped<view::frontier, Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier),
                                frontier::detail::NullFrontierDevice, decltype(stealer.getDeviceStealer()), LambdaT>);
-  const size_t cluster_size = stealer.getPreferredClusterSize();
+  const size_t cluster_size = resolveClusterSize(stealer, device_id, stealer.getPreferredClusterSize());
   auto launch_config = clutra::detail::kernels::fetchLaunchConfig(grid_size, block_size, cluster_size, work_tiles);
 
   clutra::detail::log("Advance Operator Launch - LB: block_mapped, Active Size: {}, Direction: Push, Grid Size: {} "
@@ -266,14 +281,14 @@ void launchKernelGraphBucketing(const GraphT& graph,
   const size_t work_tiles = (active_size + block_size - 1) / block_size;
   int device_id = 0;
   CUDA_CHECK(cudaGetDevice(&device_id));
-  validateGlobalStealingSupport(stealer.isInterClusterStealingEnabled(), device_id);
+  validateStealingSupport(stealer, device_id);
 
   const size_t smem = getAdvanceSharedMemorySize<CU_SIZE>(stealer.template getSharedStateSizeInBytes<CU_SIZE>());
   const size_t grid_size = clutra::detail::device::getMaxOccupancyGridSize(
       device_id, block_size, smem,
       advanceKernel<view::graph, Direction, CU_SIZE, decltype(graph_dev), frontier::detail::NullFrontierDevice,
                     frontier::detail::NullFrontierDevice, decltype(stealer.getDeviceStealer()), LambdaT>);
-  const size_t cluster_size = stealer.getPreferredClusterSize();
+  const size_t cluster_size = resolveClusterSize(stealer, device_id, stealer.getPreferredClusterSize());
   auto launch_config = clutra::detail::kernels::fetchLaunchConfig(grid_size, block_size, cluster_size, work_tiles);
 
   clutra::detail::log("Advance Operator Launch - LB: bucketing, Active Size: {}, Direction: Push, Grid Size: {} (was "
@@ -337,7 +352,7 @@ void launchKernelGraphBlockMapped(const GraphT& graph,
   const size_t work_tiles = (active_size + block_size - 1) / block_size;
   int device_id = 0;
   CUDA_CHECK(cudaGetDevice(&device_id));
-  validateGlobalStealingSupport(stealer.isInterClusterStealingEnabled(), device_id);
+  validateStealingSupport(stealer, device_id);
 
   constexpr size_t smem = 0;
   const size_t grid_size = clutra::detail::device::getMaxOccupancyGridSize(
@@ -345,7 +360,7 @@ void launchKernelGraphBlockMapped(const GraphT& graph,
       advanceKernelBlockMapped<view::graph, Direction, CU_SIZE, decltype(graph_dev),
                                frontier::detail::NullFrontierDevice, frontier::detail::NullFrontierDevice,
                                decltype(stealer.getDeviceStealer()), LambdaT>);
-  const size_t cluster_size = stealer.getPreferredClusterSize();
+  const size_t cluster_size = resolveClusterSize(stealer, device_id, stealer.getPreferredClusterSize());
   auto launch_config = clutra::detail::kernels::fetchLaunchConfig(grid_size, block_size, cluster_size, work_tiles);
 
   clutra::detail::log("Advance Operator Launch - LB: block_mapped, Active Size: {}, Direction: Push, Grid Size: {} "

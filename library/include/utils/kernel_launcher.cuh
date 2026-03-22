@@ -7,6 +7,7 @@
 
 #include "misc.cuh"
 #include <cuda_runtime.h>
+#include <stdexcept>
 #include <stealer/stealer.cuh>
 
 namespace clutra::detail::kernels {
@@ -51,13 +52,26 @@ inline void launchClusterKernelImpl(size_t grid_size,
   config.dynamicSmemBytes = dynamic_smem_bytes;
   config.stream = stream;
 
-  cudaLaunchAttribute attr[1];
-  attr[0].id = cudaLaunchAttributeClusterDimension;
-  attr[0].val.clusterDim.x = cluster_size;
-  attr[0].val.clusterDim.y = 1;
-  attr[0].val.clusterDim.z = 1;
-  config.attrs = attr;
-  config.numAttrs = 1;
+  // Cluster launch attributes are optional: avoid requesting them when
+  // cluster_size==1 to keep execution compatible with non-cluster devices.
+  if (cluster_size > 1) {
+    int device_id = 0;
+    CUDA_CHECK(cudaGetDevice(&device_id));
+    if (!isClusterLaunchSupported(device_id)) {
+      throw std::runtime_error("Cluster launch requested but not supported by the current device.");
+    }
+
+    cudaLaunchAttribute attr[1];
+    attr[0].id = cudaLaunchAttributeClusterDimension;
+    attr[0].val.clusterDim.x = cluster_size;
+    attr[0].val.clusterDim.y = 1;
+    attr[0].val.clusterDim.z = 1;
+    config.attrs = attr;
+    config.numAttrs = 1;
+  } else {
+    config.attrs = nullptr;
+    config.numAttrs = 0;
+  }
 
   CUDA_CHECK(cudaLaunchKernelEx(&config, kernel, args...));
 }

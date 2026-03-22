@@ -15,7 +15,6 @@
 
 namespace clutra::profile {
 
-#ifdef ENABLE_PROFILING
 class KernelProfilerManager {
 public:
   static KernelProfilerManager& instance() {
@@ -84,25 +83,9 @@ private:
   mutable std::mutex _mutex;
   std::map<std::string, StageStat> _stats;
 };
-#else
-class KernelProfilerManager {
-public:
-  static KernelProfilerManager& instance() {
-    static KernelProfilerManager manager;
-    return manager;
-  }
-
-  void record(const char*, const char*, float) {}
-
-  void reset() {}
-
-  void printSummary(bool = false) const {}
-};
-#endif
 
 class KernelProfiler {
 public:
-#ifdef ENABLE_PROFILING
   KernelProfiler(const char* label, const char* stage = "default") : _label(label), _stage(stage), _stopped(false) {
     CUDA_CHECK(cudaEventCreate(&_start));
     CUDA_CHECK(cudaEventCreate(&_stop));
@@ -126,22 +109,13 @@ public:
     KernelProfilerManager::instance().record(_label ? _label : "kernel", _stage ? _stage : "default", ms);
     _stopped = true;
   }
-#else
-  explicit KernelProfiler(const char*) {}
-
-  ~KernelProfiler() = default;
-
-  void stop() {}
-#endif
 
 private:
-#ifdef ENABLE_PROFILING
   const char* _label;
   const char* _stage;
   bool _stopped;
   cudaEvent_t _start{};
   cudaEvent_t _stop{};
-#endif
 };
 
 }  // namespace clutra::profile
