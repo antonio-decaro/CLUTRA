@@ -18,12 +18,11 @@
 #include <utils/logging.cuh>
 #include <utils/profile.cuh>
 
-#if defined(__CUDACC_VER_MAJOR__) && \
-    ((__CUDACC_VER_MAJOR__ > 12) || (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 9))
+#if __CUDA_ARCH__ >= 1000
 #define CLUTRA_HAS_PTX_CLUSTER_LAUNCH_CONTROL_API 1
 #endif
 
-#ifdef CLUTRA_HAS_PTX_CLUSTER_LAUNCH_CONTROL_API
+#if __CUDA_ARCH__ >= 1000
 #include <cuda/ptx>
 #endif
 
@@ -31,12 +30,12 @@ namespace clutra::operators::advance::detail {
 
 constexpr uint32_t ADVANCE_WARP_SIZE = 32;
 
-#ifdef CLUTRA_HAS_PTX_CLUSTER_LAUNCH_CONTROL_API
+#if __CUDA_ARCH__ >= 1000
 namespace ptx = cuda::ptx;
 #endif
 
 __host__ __device__ constexpr bool hasPtxClusterLaunchControlApi() {
-#ifdef CLUTRA_HAS_PTX_CLUSTER_LAUNCH_CONTROL_API
+#if __CUDA_ARCH__ >= 1000
   return true;
 #else
   return false;
@@ -44,7 +43,7 @@ __host__ __device__ constexpr bool hasPtxClusterLaunchControlApi() {
 }
 
 __device__ __forceinline__ void initClusterLaunchControl(uint64_t& mbarrier) {
-#if defined(CLUTRA_HAS_PTX_CLUSTER_LAUNCH_CONTROL_API) && __CUDA_ARCH__ >= 1000
+#if __CUDA_ARCH__ >= 1000
   auto block = cooperative_groups::this_thread_block();
   if (block.thread_rank() == 0) {
     ptx::mbarrier_init(&mbarrier, 1);
@@ -56,11 +55,9 @@ __device__ __forceinline__ void initClusterLaunchControl(uint64_t& mbarrier) {
 #endif
 }
 
-__device__ __forceinline__ bool tryAcquireCanceledCta(uint4& result,
-                                                       uint64_t& mbarrier,
-                                                       int& phase,
-                                                       uint32_t& canceled_cta_x) {
-#if defined(CLUTRA_HAS_PTX_CLUSTER_LAUNCH_CONTROL_API) && __CUDA_ARCH__ >= 1000
+__device__ __forceinline__ bool
+tryAcquireCanceledCta(uint4& result, uint64_t& mbarrier, int& phase, uint32_t& canceled_cta_x) {
+#if __CUDA_ARCH__ >= 1000
   auto block = cooperative_groups::this_thread_block();
   auto cluster = cooperative_groups::this_cluster();
 
@@ -79,8 +76,7 @@ __device__ __forceinline__ bool tryAcquireCanceledCta(uint4& result,
                                    static_cast<uint32_t>(sizeof(uint4)));
   }
 
-  while (!ptx::mbarrier_try_wait_parity(ptx::sem_acquire, ptx::scope_cluster, &mbarrier, phase)) {
-  }
+  while (!ptx::mbarrier_try_wait_parity(ptx::sem_acquire, ptx::scope_cluster, &mbarrier, phase)) {}
   phase ^= 1;
 
   const bool success = ptx::clusterlaunchcontrol_query_cancel_is_canceled(result);
@@ -88,8 +84,7 @@ __device__ __forceinline__ bool tryAcquireCanceledCta(uint4& result,
     return false;
   }
 
-  canceled_cta_x =
-      static_cast<uint32_t>(ptx::clusterlaunchcontrol_query_cancel_get_first_ctaid_x<int>(result));
+  canceled_cta_x = static_cast<uint32_t>(ptx::clusterlaunchcontrol_query_cancel_get_first_ctaid_x<int>(result));
   canceled_cta_x += static_cast<uint32_t>(cluster.block_rank());
 
   ptx::fence_proxy_async_generic_sync_restrict(ptx::sem_release, ptx::space_shared, ptx::scope_cluster);

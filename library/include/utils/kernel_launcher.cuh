@@ -9,6 +9,7 @@
 #include <cuda_runtime.h>
 #include <stdexcept>
 #include <stealer/stealer.cuh>
+#include <utils/logging.cuh>
 
 namespace clutra::detail::kernels {
 
@@ -68,6 +69,7 @@ inline void launchClusterKernelImpl(size_t grid_size,
   config.blockDim.z = 1;
   config.dynamicSmemBytes = dynamic_smem_bytes;
   config.stream = stream;
+  cudaLaunchAttribute attr[1];
 
   // Cluster launch attributes are optional: avoid requesting them when
   // cluster_size==1 to keep execution compatible with non-cluster devices.
@@ -87,28 +89,20 @@ inline void launchClusterKernelImpl(size_t grid_size,
     }
 
     if (cluster_size > 1) {
-      cudaLaunchAttribute attr[1];
       attr[0].id = cudaLaunchAttributeClusterDimension;
       attr[0].val.clusterDim.x = cluster_size;
       attr[0].val.clusterDim.y = 1;
       attr[0].val.clusterDim.z = 1;
       config.attrs = attr;
       config.numAttrs = 1;
-      cudaError_t launch_err = cudaLaunchKernelEx(&config, kernel, args...);
-      if (launch_err == cudaErrorInvalidValue) {
-        // Fallback to a standard launch when cluster constraints are not
-        // satisfied at runtime for this kernel/configuration.
-        config.attrs = nullptr;
-        config.numAttrs = 0;
-        launch_err = cudaLaunchKernelEx(&config, kernel, args...);
-      }
-      CUDA_CHECK(launch_err);
-      return;
     }
   } else {
     config.attrs = nullptr;
     config.numAttrs = 0;
   }
+
+  clutra::detail::log("Launching kernel with grid_size={}, block_size={}, cluster_size={}, dynamic_smem_bytes={}",
+                      config.gridDim.x, config.blockDim.x, cluster_size, config.dynamicSmemBytes);
 
   CUDA_CHECK(cudaLaunchKernelEx(&config, kernel, args...));
 }
@@ -133,17 +127,6 @@ inline void
 launchClusterKernel(const LaunchConfig& config, const size_t& dynamic_smem_bytes, KernelT kernel, Args... args) {
   launchClusterKernelImpl(config.grid_size, config.block_size, config.cluster_size, dynamic_smem_bytes, 0, kernel,
                           args...);
-}
-
-template <typename DerivedStealerT, typename DeviceStealerT>
-inline void adjustLaunchConfig(LaunchConfig& config,
-                               const size_t workload_size,
-                               clutra::stealer::StealerBase<DerivedStealerT, DeviceStealerT>& stealer) {
-  if (stealer.isIntraClusterStealingEnabled() || stealer.isInterClusterStealingEnabled()) {
-    if (workload_size < config.grid_size * 4) {
-      config.cluster_size = 1;
-    }
-  }
 }
 
 /**

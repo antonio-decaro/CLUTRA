@@ -30,9 +30,8 @@ inline void validateStealingSupport(const StealerT& stealer, int device_id) {
     const bool supported =
         hasPtxClusterLaunchControlApi() && clutra::detail::kernels::isClusterLaunchControlSupported(device_id);
     if (!supported) {
-      throw std::runtime_error(
-          "Global stealing requires SM100+ cluster launch control support and a CUDA toolkit with "
-          "cluster-launch-control PTX APIs.");
+      throw std::runtime_error("Global stealing requires SM100+ cluster launch control support and a CUDA toolkit with "
+                               "cluster-launch-control PTX APIs.");
     }
   }
 }
@@ -95,8 +94,8 @@ void launchKernelBucketing(const GraphT& graph,
       active_size, (Direction == advance_direction::push) ? "Push" : "Pull", launch_config.grid_size, grid_size,
       launch_config.block_size, launch_config.cluster_size, smem,
       stealer.isIntraClusterStealingEnabled() ? "Yes" : "No", stealer.isInterClusterStealingEnabled() ? "Yes" : "No",
-      stealer.isInterClusterStealingEnabled() ? "SM100 cancel" : "disabled",
-      stealer.getLocalStealingChunkSize(), stealer.getGlobalStealingChunkSize());
+      stealer.isInterClusterStealingEnabled() ? "SM100 cancel" : "disabled", stealer.getLocalStealingChunkSize(),
+      stealer.getGlobalStealingChunkSize());
 
   clutra::profile::KernelProfiler profiler("advanceKernelBucketing", "core");
 
@@ -106,16 +105,16 @@ void launchKernelBucketing(const GraphT& graph,
     auto& kernel_launch_function =
         detail::advanceKernel<view::frontier, Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier),
                               decltype(out_dev_frontier), decltype(stealer_dev), LambdaT>;
-    clutra::detail::kernels::launchClusterKernel(
-        launch_config, kernel_launch_function, graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor,
-        work_tiles, stealer_dev, std::forward<LambdaT>(functor));
+    clutra::detail::kernels::launchClusterKernel(launch_config, kernel_launch_function, graph_dev, in_dev_frontier,
+                                                 out_dev_frontier, coarsening_factor, work_tiles, stealer_dev,
+                                                 std::forward<LambdaT>(functor));
   } else {
     auto& kernel_launch_function =
         detail::advanceKernel<view::frontier, Direction, CU_SIZE, decltype(graph_dev), decltype(in_dev_frontier),
                               frontier::detail::NullFrontierDevice, decltype(stealer_dev), LambdaT>;
-    clutra::detail::kernels::launchClusterKernel(
-        launch_config, kernel_launch_function, graph_dev, in_dev_frontier, frontier::detail::NullFrontierDevice{},
-        coarsening_factor, work_tiles, stealer_dev, std::forward<LambdaT>(functor));
+    clutra::detail::kernels::launchClusterKernel(launch_config, kernel_launch_function, graph_dev, in_dev_frontier,
+                                                 frontier::detail::NullFrontierDevice{}, coarsening_factor, work_tiles,
+                                                 stealer_dev, std::forward<LambdaT>(functor));
   }
 
   CUDA_CHECK(cudaDeviceSynchronize());
@@ -182,17 +181,17 @@ void launchKernelBlockMapped(const GraphT& graph,
         detail::advanceKernelBlockMapped<view::frontier, Direction, CU_SIZE, decltype(graph_dev),
                                          decltype(in_dev_frontier), decltype(out_dev_frontier), decltype(stealer_dev),
                                          LambdaT>;
-    clutra::detail::kernels::launchClusterKernel(
-        launch_config, kernel_launch_function, graph_dev, in_dev_frontier, out_dev_frontier, coarsening_factor,
-        work_tiles, stealer_dev, std::forward<LambdaT>(functor));
+    clutra::detail::kernels::launchClusterKernel(launch_config, kernel_launch_function, graph_dev, in_dev_frontier,
+                                                 out_dev_frontier, coarsening_factor, work_tiles, stealer_dev,
+                                                 std::forward<LambdaT>(functor));
   } else {
     auto& kernel_launch_function =
         detail::advanceKernelBlockMapped<view::frontier, Direction, CU_SIZE, decltype(graph_dev),
                                          decltype(in_dev_frontier), frontier::detail::NullFrontierDevice,
                                          decltype(stealer_dev), LambdaT>;
-    clutra::detail::kernels::launchClusterKernel(
-        launch_config, kernel_launch_function, graph_dev, in_dev_frontier, frontier::detail::NullFrontierDevice{},
-        coarsening_factor, work_tiles, stealer_dev, std::forward<LambdaT>(functor));
+    clutra::detail::kernels::launchClusterKernel(launch_config, kernel_launch_function, graph_dev, in_dev_frontier,
+                                                 frontier::detail::NullFrontierDevice{}, coarsening_factor, work_tiles,
+                                                 stealer_dev, std::forward<LambdaT>(functor));
   }
 
   CUDA_CHECK(cudaDeviceSynchronize());
@@ -278,10 +277,7 @@ void launchKernelGraphBucketing(const GraphT& graph,
   validateStealingSupport(stealer, device_id);
 
   const size_t smem = getAdvanceSharedMemorySize<CU_SIZE>(stealer.template getSharedStateSizeInBytes<CU_SIZE>());
-  const size_t grid_size = clutra::detail::device::getMaxOccupancyGridSize(
-      device_id, block_size, smem,
-      advanceKernel<view::graph, Direction, CU_SIZE, decltype(graph_dev), frontier::detail::NullFrontierDevice,
-                    frontier::detail::NullFrontierDevice, decltype(stealer.getDeviceStealer()), LambdaT>);
+  const size_t grid_size = work_tiles;
   const size_t cluster_size = resolveClusterSize(stealer, device_id, stealer.getPreferredClusterSize());
   auto launch_config = clutra::detail::kernels::fetchLaunchConfig(grid_size, block_size, cluster_size, work_tiles);
 
@@ -299,13 +295,12 @@ void launchKernelGraphBucketing(const GraphT& graph,
   auto stealer_dev = stealer.getDeviceStealer();
   if (output_frontier != nullptr) {
     auto out_dev_frontier = output_frontier->getDeviceFrontier();
-    auto& kernel_launch_function =
-        detail::advanceKernel<view::graph, Direction, CU_SIZE, decltype(graph_dev),
-                              frontier::detail::NullFrontierDevice, decltype(out_dev_frontier),
-                              decltype(stealer_dev), LambdaT>;
-    clutra::detail::kernels::launchClusterKernel(
-        launch_config, kernel_launch_function, graph_dev, frontier::detail::NullFrontierDevice{}, out_dev_frontier, 1,
-        work_tiles, stealer_dev, std::forward<LambdaT>(functor));
+    auto& kernel_launch_function = detail::advanceKernel<view::graph, Direction, CU_SIZE, decltype(graph_dev),
+                                                         frontier::detail::NullFrontierDevice,
+                                                         decltype(out_dev_frontier), decltype(stealer_dev), LambdaT>;
+    clutra::detail::kernels::launchClusterKernel(launch_config, kernel_launch_function, graph_dev,
+                                                 frontier::detail::NullFrontierDevice{}, out_dev_frontier, 1,
+                                                 work_tiles, stealer_dev, std::forward<LambdaT>(functor));
   } else {
     auto& kernel_launch_function =
         detail::advanceKernel<view::graph, Direction, CU_SIZE, decltype(graph_dev),
@@ -355,12 +350,11 @@ void launchKernelGraphBlockMapped(const GraphT& graph,
 
   clutra::detail::log("Advance Operator Launch - LB: block_mapped, Active Size: {}, Direction: Push, Grid Size: {} "
                       "(was {}), Block Size: {}, Cluster Size: {}, SMEM: {}, Local Stealing: {}, Global Stealing: {}, "
-                      "Global Mode: {}, Local Chunk: {}, Global Chunk: {}",
+                      "Local Chunk: {}, Global Chunk: {}",
                       active_size, launch_config.grid_size, grid_size, launch_config.block_size,
                       launch_config.cluster_size, smem, stealer.isIntraClusterStealingEnabled() ? "Yes" : "No",
-                      stealer.isInterClusterStealingEnabled() ? "Yes" : "No",
-                      stealer.isInterClusterStealingEnabled() ? "SM100 cancel" : "disabled",
-                      stealer.getLocalStealingChunkSize(), stealer.getGlobalStealingChunkSize());
+                      stealer.isInterClusterStealingEnabled() ? "Yes" : "No", stealer.getLocalStealingChunkSize(),
+                      stealer.getGlobalStealingChunkSize());
 
   clutra::profile::KernelProfiler profiler("advanceKernelBlockMapped", "core");
 
@@ -379,10 +373,10 @@ void launchKernelGraphBlockMapped(const GraphT& graph,
         detail::advanceKernelBlockMapped<view::graph, Direction, CU_SIZE, decltype(graph_dev),
                                          frontier::detail::NullFrontierDevice, frontier::detail::NullFrontierDevice,
                                          decltype(stealer_dev), LambdaT>;
-    clutra::detail::kernels::launchClusterKernel(
-        launch_config, kernel_launch_function, graph_dev, frontier::detail::NullFrontierDevice{},
-        frontier::detail::NullFrontierDevice{}, coarsening_factor, work_tiles, stealer_dev,
-        std::forward<LambdaT>(functor));
+    clutra::detail::kernels::launchClusterKernel(launch_config, kernel_launch_function, graph_dev,
+                                                 frontier::detail::NullFrontierDevice{},
+                                                 frontier::detail::NullFrontierDevice{}, coarsening_factor, work_tiles,
+                                                 stealer_dev, std::forward<LambdaT>(functor));
   }
 
   CUDA_CHECK(cudaDeviceSynchronize());
