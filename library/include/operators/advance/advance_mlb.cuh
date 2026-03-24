@@ -26,14 +26,14 @@ inline void validateStealingSupport(const StealerT& stealer, int device_id) {
     throw std::runtime_error("Local stealing requires cluster launch support on the current device.");
   }
 
-  if (stealer.isInterClusterStealingEnabled()) {
-    const bool supported =
-        hasPtxClusterLaunchControlApi() && clutra::detail::kernels::isClusterLaunchControlSupported(device_id);
-    if (!supported) {
-      throw std::runtime_error("Global stealing requires SM100+ cluster launch control support and a CUDA toolkit with "
-                               "cluster-launch-control PTX APIs.");
-    }
-  }
+  // if (stealer.isInterClusterStealingEnabled()) {
+  //   const bool supported =
+  //       hasPtxClusterLaunchControlApi() && clutra::detail::kernels::isClusterLaunchControlSupported(device_id);
+  //   if (!supported) {
+  //     throw std::runtime_error("Global stealing requires SM100+ cluster launch control support and a CUDA toolkit with "
+  //                              "cluster-launch-control PTX APIs.");
+  //   }
+  // }
 }
 
 template <typename StealerT>
