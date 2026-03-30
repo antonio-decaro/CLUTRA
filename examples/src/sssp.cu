@@ -77,6 +77,7 @@ int main(int argc, char** argv) {
   auto cli_handles = configureBaseCLI(app, opts);
   CLI11_PARSE(app, argc, argv);
   finalizeGraphOptions(opts, cli_handles);
+  CUresult res = cuInit(0);
 
   std::cerr << "[*] Reading CSR" << std::endl;
   clutra::graph::Properties properties;

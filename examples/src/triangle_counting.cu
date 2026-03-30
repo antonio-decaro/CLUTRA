@@ -182,6 +182,8 @@ int main(int argc, char** argv) {
   CLI11_PARSE(app, argc, argv);
   finalizeGraphOptions(opts, cli_handles);
 
+  CUresult res = cuInit(0);
+
   std::cerr << "[*] Reading CSR" << std::endl;
   clutra::graph::Properties properties;
   auto csr = readCSR<float, uint32_t, uint32_t>(opts, &properties);

@@ -1,5 +1,6 @@
 #include "utils.hpp"
 #include <clutra.hpp>
+#include <cuda.h>
 #include <iostream>
 
 constexpr size_t MAX_THREADS = 1 << 20;
@@ -52,6 +53,7 @@ int main(int argc, char** argv) {
   auto cli_handles = configureBaseCLI(app, opts);
   CLI11_PARSE(app, argc, argv);
   finalizeGraphOptions(opts, cli_handles);
+  CUresult res = cuInit(0);
 
   std::cerr << "[*] Reading CSR" << std::endl;
   clutra::graph::Properties properties;
