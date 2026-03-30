@@ -99,13 +99,13 @@ do
         continue
       fi
       echo "  Source: $source"
-      $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $measure_work_imbalance $enable_stealing $cluster_size -s "$source" $detailed >> "$out_dir/${dataset_basename}.out" 2>&1
+      timeout 10m $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $measure_work_imbalance $enable_stealing $cluster_size -s "$source" $detailed >> "$out_dir/${dataset_basename}.out" 2>&1
     done
   else
     for ((run=1; run<=num_runs; run++))
     do
       echo "  Run $run/$num_runs"
-      $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $measure_work_imbalance $enable_stealing $cluster_size $detailed >> "$out_dir/${dataset_basename}.out" 2>&1
+      timeout 10m $SCRIPT_DIR/build/examples/clutra_$benchmark -b "$dataset_path" $measure_work_imbalance $enable_stealing $cluster_size $detailed >> "$out_dir/${dataset_basename}.out" 2>&1
     done
   fi
 done
